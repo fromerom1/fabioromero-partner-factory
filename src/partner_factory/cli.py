@@ -22,7 +22,7 @@ import typer
 from pydantic import ValidationError
 
 from partner_factory import archive as archiving
-from partner_factory import processor, sql
+from partner_factory import drift, processor, sql
 from partner_factory.config import Partner, Platform, load_partner, load_platform
 from partner_factory.connection import (
     MissingCredentials,
@@ -123,12 +123,26 @@ def validate(env: EnvOption = "dev") -> None:
 
 @app.command()
 def deploy(partner_code: str, env: EnvOption = "dev", dry_run: DryRunOption = False) -> None:
-    """Create the loader of a partner: database, schemas, stage, raw tables and pipes."""
+    """Create the loader of a partner: database, schemas, stages, raw tables and pipes.
+
+    Only creates what is missing. If a deployed pipe or file format differs from what the
+    configuration generates, it stops before changing anything and prints the procedure.
+    """
     platform, partner = _platform(env), _partner(partner_code)
     script = sql.partner_sql(platform, partner)
     if dry_run:
         typer.echo(script)
         return
+    try:
+        with connect(platform) as connection:
+            differences = drift.find(connection, platform, partner)
+    except MissingCredentials as error:
+        raise _fail(str(error)) from error
+    if differences:
+        for difference in differences:
+            typer.secho(f"{difference.kind} {difference.name}", fg=typer.colors.RED, err=True)
+            typer.echo(f"    {difference.detail}", err=True)
+        raise _fail("\n" + drift.PROCEDURE.format(partner=partner.partner_code))
     _run(platform, script)
 
 
