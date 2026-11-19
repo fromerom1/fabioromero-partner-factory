@@ -10,14 +10,27 @@ clean-targets: [target, dbt_packages]
 
 # One project for every partner. It is always run through `factory dbt <PARTNER> ...`, which
 # selects the partner database and passes the variables compiled from partners/<partner>.yml:
-# partner_code, country_code, currency_code, timezone, store and sales_transaction.
+# partner_code, country_code, currency_code, timezone, timezone_sql, store and sales_transaction.
 vars:
   # How far back from the newest processed record the incremental models read again, to pick
   # up records that Snowpipe committed out of order.
   raw_lookback_hours: 24
+  # How many dates each report keeps, counted back from the most recent one.
+  batch_report_dates: 40
+  sales_report_dates: 40
+  top_stores_report_dates: 10
+  top_stores_per_date: 5
 
 models:
   partner_factory:
     processed:
       +schema: PROCESSED
       +materialized: table
+    # Reports are kept by snapshot date. Running again on the same day replaces that day's
+    # snapshot instead of adding to it; earlier snapshots are never touched.
+    analytics:
+      +schema: ANALYTICS
+      +materialized: incremental
+      +incremental_strategy: delete+insert
+      +unique_key: snapshot_date
+      +on_schema_change: fail

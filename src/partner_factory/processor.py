@@ -189,6 +189,7 @@ def dbt_vars(platform: Platform, partner: Partner) -> dict:
         "partner_code": partner.partner_code,
         "country_code": partner.country_code,
         "currency_code": partner.currency_code,
+        "timezone": partner.timezone,
         "timezone_sql": timezone_sql(partner),
         **{name: entity_spec(platform, partner, name) for name in ENTITIES},
     }
