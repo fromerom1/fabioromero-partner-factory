@@ -19,3 +19,21 @@
     from {{ ref('std_sales_transaction') }}
     where status = 'COMPLETED'
 {% endmacro %}
+
+
+{#- Incremental strategy of the reports: the run replaces the snapshot of its date.
+
+    dbt's delete+insert only deletes the keys present in the new result, so a run that
+    produces no rows would leave the earlier snapshot of the day in place. This one deletes
+    by the snapshot date of the run, whatever the result holds, in the same transaction as
+    the insert. -#}
+{% macro get_incremental_replace_snapshot_sql(arg_dict) %}
+    {%- set target = arg_dict["target_relation"] -%}
+    {%- set columns = get_quoted_csv(arg_dict["dest_columns"] | map(attribute="name")) -%}
+    {%- set dml -%}
+        delete from {{ target }} where snapshot_date = {{ snapshot_date() }};
+        insert into {{ target }} ({{ columns }})
+        select {{ columns }} from {{ arg_dict["temp_relation"] }}
+    {%- endset -%}
+    {% do return(snowflake_dml_explicit_transaction(dml)) %}
+{% endmacro %}
