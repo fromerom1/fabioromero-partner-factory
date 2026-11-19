@@ -56,23 +56,39 @@ class SourceObjects:
     file_pattern: str
 
 
-def _file_format_options(source: Source) -> list[str]:
+def file_format_options(source: Source) -> dict[str, object]:
+    """The options the factory sets on a file format, as Snowflake reports them back."""
     if source.csv is None:
-        return ["TYPE = JSON"]
-    delimiter = "'\\t'" if source.csv.delimiter == "\t" else literal(source.csv.delimiter)
-    quote = "NONE" if source.csv.quote == "none" else literal(source.csv.quote)
-    return [
-        "TYPE = CSV",
-        f"FIELD_DELIMITER = {delimiter}",
-        f"FIELD_OPTIONALLY_ENCLOSED_BY = {quote}",
-        f"ENCODING = {literal(source.csv.encoding)}",
+        return {"TYPE": "JSON"}
+    return {
+        "TYPE": "CSV",
+        "FIELD_DELIMITER": source.csv.delimiter,
+        "FIELD_OPTIONALLY_ENCLOSED_BY": "NONE" if source.csv.quote == "none" else source.csv.quote,
+        "ENCODING": source.csv.encoding,
         # Raw keeps what the partner sent: no header skipping, no trimming, no NULL markers.
-        "SKIP_HEADER = 0",
-        "TRIM_SPACE = FALSE",
-        "NULL_IF = ()",
+        "SKIP_HEADER": 0,
+        "TRIM_SPACE": False,
+        "NULL_IF": [],
         # A line with fewer or more fields than expected is loaded and judged by the processor.
-        "ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE",
-    ]
+        "ERROR_ON_COLUMN_COUNT_MISMATCH": False,
+    }
+
+
+def _option_sql(name: str, value: object) -> str:
+    match value:
+        case bool():
+            rendered = "TRUE" if value else "FALSE"
+        case int():
+            rendered = str(value)
+        case list():
+            rendered = "(" + ", ".join(literal(item) for item in value) + ")"
+        case "\t":
+            rendered = "'\\t'"
+        case str() if name == "TYPE" or value == "NONE":
+            rendered = value
+        case _:
+            rendered = literal(str(value))
+    return f"{name} = {rendered}"
 
 
 def _record_expression(source: Source) -> str:
@@ -97,7 +113,9 @@ def source_objects(name: str, source: Source) -> SourceObjects:
         table=table,
         pipe=f"{table}_PIPE",
         file_format=f"{table}_FORMAT",
-        file_format_options=_file_format_options(source),
+        file_format_options=[
+            _option_sql(option, value) for option, value in file_format_options(source).items()
+        ],
         record_expression=_record_expression(source),
         file_pattern=source.file_pattern,
     )
@@ -136,3 +154,12 @@ def partner_sql(platform: Platform, partner: Partner) -> str:
         key_table=PSEUDONYMIZATION_KEY_TABLE,
         sources=[source_objects(name, source) for name, source in partner.sources.items()],
     )
+
+
+def pipe_definitions(platform: Platform, partner: Partner) -> dict[str, str]:
+    """The COPY statement of each pipe, by pipe name, exactly as the deploy script defines it."""
+    script = partner_sql(platform, partner)
+    pipes = re.findall(
+        r"CREATE PIPE IF NOT EXISTS \S+\.(\w+)\n.*?\nAS\n(.*?);\n", script, re.DOTALL
+    )
+    return dict(pipes)
