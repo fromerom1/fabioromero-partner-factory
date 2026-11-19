@@ -37,8 +37,7 @@ logs/
 *.auto.tfvars.json
 crash.log
 
-# Airflow / Astro
-.astro/
+# Airflow / Astro (airflow/.gitignore covers the rest of the Astro project)
 airflow.db
 airflow-webserver.pid
 

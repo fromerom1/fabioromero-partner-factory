@@ -37,3 +37,20 @@ jobs:
 
       - name: Tests
         run: uv run pytest
+
+  # The DAGs are generated from the partner files. This only proves they import and have the
+  # expected shape; a full run needs Snowflake and is done on the local Airflow (see README).
+  dags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: DAG import test
+        run: >
+          uv run --no-project --with apache-airflow==3.4.0 --with pytest
+          pytest --rootdir airflow airflow/tests

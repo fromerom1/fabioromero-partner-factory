@@ -1,0 +1,2 @@
+# Airflow only needs uv: the factory and dbt live in their own environment (see Dockerfile).
+uv
