@@ -80,3 +80,44 @@ from typed
 {% macro current_version_first() -%}
     source_updated_at_utc desc nulls last, {{ last_received_first() }}
 {%- endmacro %}
+
+
+{#- The standard columns of a sales transaction, in table order. -#}
+{% macro sales_transaction_columns() -%}
+    {{ return([
+        'partner_code', 'transaction_id', 'store_id', 'transaction_ts_utc',
+        'transaction_date_local', 'amount', 'currency_code', 'status', 'customer_ref',
+        'batch_date', 'source_file', 'loaded_at', 'source_row_number',
+        'source_file_modified_at', 'source_updated_at_utc'
+    ]) }}
+{%- endmacro %}
+
+
+{#-
+    Valid sales records in standard form. The one definition of how a checked record becomes a
+    standard row: the incremental model and the test that recomputes it both use it.
+
+    The partner sends local wall-clock times. `timezone_sql` gives the zone of each record from
+    its store (the partner's zone, or the exception declared for that store), and both
+    conversions name source and target, so nothing depends on the session time zone.
+-#}
+{% macro valid_sales_transactions() %}
+    select
+        '{{ var("partner_code") }}' as partner_code,
+        transaction_id,
+        store_id,
+        convert_timezone({{ var("timezone_sql") }}, 'UTC', transaction_ts) as transaction_ts_utc,
+        transaction_ts::date as transaction_date_local,
+        amount,
+        coalesce(currency_code, '{{ var("currency_code") }}') as currency_code,
+        status,
+        customer_ref,
+        batch_date,
+        source_file,
+        loaded_at,
+        source_row_number,
+        source_file_modified_at,
+        convert_timezone({{ var("timezone_sql") }}, 'UTC', updated_at) as source_updated_at_utc
+    from {{ ref('checked_sales_transaction') }}
+    where array_size(reject_reasons) = 0
+{% endmacro %}

@@ -15,37 +15,18 @@
     already holds for the same keys. The current version is then chosen among all of them, so
     a record that arrives late but is older than the stored one never replaces it, and running
     twice gives the same table.
+
+    When a stored row and a record read again are the same delivery, the one just computed
+    wins, so a change of mapping reaches the rows inside the window. Rows older than the window
+    need `--full-refresh`; assert_incremental_matches_full_recompute fails until then.
 -#}
 
 {%- set key = var('sales_transaction').key | join(', ') -%}
-{%- set columns = [
-    'partner_code', 'transaction_id', 'store_id', 'transaction_ts_utc', 'transaction_date_local',
-    'amount', 'currency_code', 'status', 'customer_ref', 'batch_date', 'source_file', 'loaded_at',
-    'source_row_number', 'source_file_modified_at', 'source_updated_at_utc'
-] -%}
+{%- set columns = sales_transaction_columns() | join(', ') -%}
 
 with new_records as (
 
-    select
-        '{{ var("partner_code") }}' as partner_code,
-        transaction_id,
-        store_id,
-        -- The partner sends local wall-clock times. Both conversions name their zones, so the
-        -- result does not depend on the session time zone.
-        convert_timezone('{{ var("timezone") }}', 'UTC', transaction_ts) as transaction_ts_utc,
-        transaction_ts::date as transaction_date_local,
-        amount,
-        coalesce(currency_code, '{{ var("currency_code") }}') as currency_code,
-        status,
-        customer_ref,
-        batch_date,
-        source_file,
-        loaded_at,
-        source_row_number,
-        source_file_modified_at,
-        convert_timezone('{{ var("timezone") }}', 'UTC', updated_at) as source_updated_at_utc
-    from {{ ref('checked_sales_transaction') }}
-    where array_size(reject_reasons) = 0
+    {{ valid_sales_transactions() }}
     {%- if is_incremental() %}
       and loaded_at >= (
           select dateadd(
@@ -61,18 +42,21 @@ with new_records as (
 
 candidates as (
 
-    select {{ columns | join(', ') }} from new_records
+    select {{ columns }}, true as is_recomputed from new_records
     {%- if is_incremental() %}
 
     union all
 
-    select {{ columns | join(', ') }}
+    select {{ columns }}, false as is_recomputed
     from {{ this }}
     where ({{ key }}) in (select {{ key }} from new_records)
     {%- endif %}
 
 )
 
-select {{ columns | join(', ') }}
+select {{ columns }}
 from candidates
-qualify row_number() over (partition by {{ key }} order by {{ current_version_first() }}) = 1
+qualify row_number() over (
+    partition by {{ key }}
+    order by {{ current_version_first() }}, is_recomputed desc
+) = 1
