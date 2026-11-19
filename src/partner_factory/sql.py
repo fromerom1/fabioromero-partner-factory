@@ -132,6 +132,7 @@ def partner_sql(platform: Platform, partner: Partner) -> str:
         partner=partner,
         database=platform.database(partner),
         landing_url=platform.landing_url(partner),
+        historical_url=platform.historical_url(partner),
         key_table=PSEUDONYMIZATION_KEY_TABLE,
         sources=[source_objects(name, source) for name, source in partner.sources.items()],
     )

@@ -21,6 +21,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
+from partner_factory import archive as archiving
 from partner_factory import processor, sql
 from partner_factory.config import Partner, Platform, load_partner, load_platform
 from partner_factory.connection import (
@@ -162,6 +163,15 @@ def load_status(partner_code: str, env: EnvOption = "dev") -> None:
             _print_table(pipes)
             typer.echo("")
             _print_table(query(connection, f"{per_file}\nORDER BY SOURCE, SOURCE_FILE"))
+            typer.echo(
+                "\nIn landing (processed files are moved to historical by `factory archive`):"
+            )
+            _print_table(
+                [
+                    {"FILE": file.path, "STATE": state}
+                    for file, state in archiving.landing_files(connection, platform, partner)
+                ]
+            )
     except MissingCredentials as error:
         raise _fail(str(error)) from error
 
@@ -173,23 +183,29 @@ def dbt_vars(partner_code: str, env: EnvOption = "dev") -> None:
     typer.echo(json.dumps(processor.dbt_vars(platform, partner), indent=2))
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def dbt(ctx: typer.Context, partner_code: str, env: EnvOption = "dev") -> None:
-    """Run dbt for one partner, for example: factory dbt MERCADOLOCAL_BR build
+LookbackOption = Annotated[
+    int | None,
+    typer.Option(
+        "--lookback-hours",
+        min=0,
+        help="Hours of already processed records the incremental models read again."
+        " Default: raw_lookback_hours in dbt_project.yml.",
+    ),
+]
 
-    The dbt project is the same for every partner. This command points it at the partner's
-    database and passes the variables compiled from the partner file.
-    """
-    platform, partner = _platform(env), _partner(partner_code)
-    if not ctx.args:
-        raise _fail("add a dbt command, for example: factory dbt MERCADOLOCAL_BR build")
+
+def _dbt(platform: Platform, partner: Partner, arguments: list[str], lookback: int | None) -> int:
+    """Run dbt for one partner and return its exit code."""
+    variables = processor.dbt_vars(platform, partner)
+    if lookback is not None:
+        variables["raw_lookback_hours"] = lookback
     command = [
         str(Path(sys.executable).parent / "dbt"),  # the dbt of this environment, not of PATH
-        *ctx.args,
+        *arguments,
         *("--project-dir", str(DBT_DIR), "--profiles-dir", str(DBT_DIR)),
         # Relative to the project: one target directory per partner keeps their artifacts apart.
         *("--target-path", f"target/{partner.prefix}"),
-        *("--vars", json.dumps(processor.dbt_vars(platform, partner))),
+        *("--vars", json.dumps(variables)),
     ]
     environment = os.environ | {
         "FACTORY_SNOWFLAKE_ACCOUNT": platform.snowflake.account,
@@ -198,7 +214,57 @@ def dbt(ctx: typer.Context, partner_code: str, env: EnvOption = "dev") -> None:
         "FACTORY_SNOWFLAKE_WAREHOUSE": platform.snowflake.warehouse,
         "FACTORY_DATABASE": platform.database(partner),
     }
-    raise typer.Exit(code=subprocess.run(command, env=environment, check=False).returncode)
+    return subprocess.run(command, env=environment, check=False).returncode
+
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def dbt(
+    ctx: typer.Context,
+    partner_code: str,
+    env: EnvOption = "dev",
+    lookback_hours: LookbackOption = None,
+) -> None:
+    """Run dbt for one partner, for example: factory dbt MERCADOLOCAL_BR build
+
+    The dbt project is the same for every partner. This command points it at the partner's
+    database and passes the variables compiled from the partner file.
+    """
+    platform, partner = _platform(env), _partner(partner_code)
+    if not ctx.args:
+        raise _fail("add a dbt command, for example: factory dbt MERCADOLOCAL_BR build")
+    raise typer.Exit(code=_dbt(platform, partner, ctx.args, lookback_hours))
+
+
+@app.command()
+def archive(
+    partner_code: str, env: EnvOption = "dev", lookback_hours: LookbackOption = None
+) -> None:
+    """Process what has arrived and move it from landing to historical.
+
+    The list of files is taken before the build, and only completely loaded files are on it.
+    If the build and its tests pass, those files are copied to historical, the copy is
+    confirmed and only then are they removed from landing. Files that arrive during the run,
+    or that are not completely loaded, stay in landing for the next run.
+    """
+    platform, partner = _platform(env), _partner(partner_code)
+    try:
+        with connect(platform) as connection:
+            before = archiving.landing_files(connection, platform, partner)
+    except MissingCredentials as error:
+        raise _fail(str(error)) from error
+    ready = [file for file, state in before if state == archiving.LOADED]
+    typer.echo(f"{len(ready)} of {len(before)} files in landing are loaded and will be archived")
+
+    if _dbt(platform, partner, ["build"], lookback_hours) != 0:
+        raise _fail("the build failed: nothing was archived")
+
+    with connect(platform) as connection:
+        for path, outcome in archiving.archive(connection, platform, partner, ready):
+            typer.echo(f"  {outcome:<10}  {path}")
+        remaining = archiving.landing_files(connection, platform, partner)
+    if remaining:
+        typer.echo("Still in landing:")
+        _print_table([{"FILE": file.path, "STATE": state} for file, state in remaining])
 
 
 @platform_app.command()

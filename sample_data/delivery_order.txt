@@ -10,3 +10,6 @@ tiendaviva_es/orders/2026/10/06/tiendaviva_orders_20261006_01.jsonl
 tiendaviva_es/orders/2026/10/06/tiendaviva_orders_20261006_02.jsonl
 tiendaviva_es/orders/2026/10/07/tiendaviva_orders_20261007_01.jsonl
 tiendaviva_es/orders/2026/10/07/tiendaviva_orders_20261007_02.jsonl
+mercadolocal_br/sales_20261004.csv
+mercadolocal_br/sales_20261004_02.csv
+tiendaviva_es/orders/2026/10/08/tiendaviva_orders_20261008_01.jsonl

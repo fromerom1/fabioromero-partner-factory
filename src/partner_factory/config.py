@@ -396,6 +396,9 @@ class Platform(StrictModel):
     def landing_url(self, partner: Partner) -> str:
         return f"s3://{self.aws.bucket}/{partner.prefix}/landing/"
 
+    def historical_url(self, partner: Partner) -> str:
+        return f"s3://{self.aws.bucket}/{partner.prefix}/historical/"
+
 
 def _read_yaml(path: Path) -> dict:
     with path.open(encoding="utf-8") as handle:

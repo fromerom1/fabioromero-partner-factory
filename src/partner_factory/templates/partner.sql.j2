@@ -19,6 +19,11 @@ CREATE STAGE IF NOT EXISTS {{ database }}.RAW.LANDING
     STORAGE_INTEGRATION = {{ sf.storage_integration }}
     COMMENT = 'Where the partner delivers files';
 
+CREATE STAGE IF NOT EXISTS {{ database }}.RAW.HISTORICAL
+    URL = {{ historical_url | literal }}
+    STORAGE_INTEGRATION = {{ sf.storage_integration }}
+    COMMENT = 'Where files are kept once they have been loaded and processed';
+
 -- Secret used to pseudonymize customer identifiers, one per partner so that references cannot
 -- be linked across partners. It lives in RAW, the one schema that is never granted to readers,
 -- and is generated inside Snowflake: it never exists in a file, a log or this repository.
