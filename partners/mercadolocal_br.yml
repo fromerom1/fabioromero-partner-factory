@@ -1,0 +1,31 @@
+partner_code: MERCADOLOCAL_BR
+display_name: MercadoLocal (Brazil)
+country_code: BR
+currency_code: BRL
+timezone: America/Sao_Paulo
+
+sources:
+  stores:
+    description: Store list. Additive, new stores appear and existing ones remain.
+    format: csv
+    file_pattern: "(.*/)?stores_[0-9]{8}[^/]*[.]csv"
+    example_file: stores_20261001.csv
+    csv:
+      columns: [store_group, store_token, store_name]
+
+  sales:
+    description: Sales transactions. One or more files per batch date.
+    format: csv
+    file_pattern: "(.*/)?sales_[0-9]{8}[^/]*[.]csv"
+    example_file: sales_20261001.csv
+    csv:
+      # The data dictionary lists six columns; the sample record carries a seventh, source_id,
+      # between amount and user_role. The file order below follows the sample.
+      columns:
+        - store_token
+        - transaction_id
+        - receipt_token
+        - transaction_time
+        - amount
+        - source_id
+        - user_role

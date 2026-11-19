@@ -1,0 +1,18 @@
+partner_code: TIENDAVIVA_ES
+display_name: TiendaViva (Spain)
+country_code: ES
+currency_code: EUR
+timezone: Europe/Madrid
+
+sources:
+  orders:
+    description: Order events, line-delimited JSON. An order is sent again every time it changes.
+    format: json
+    file_pattern: "orders/[0-9]{4}/[0-9]{2}/[0-9]{2}/tiendaviva_orders_[0-9]{8}_[0-9]+[.]jsonl"
+    example_file: orders/2026/10/06/tiendaviva_orders_20261006_01.jsonl
+
+  shops:
+    description: Monthly full snapshot of shops, one JSON document per file.
+    format: json
+    file_pattern: "(.*/)?shops_[0-9]{6}[.]json"
+    example_file: shops_202610.json
