@@ -1,0 +1,12 @@
+mercadolocal_br/stores_20261001.csv
+mercadolocal_br/sales_20261001.csv
+mercadolocal_br/stores_20261002.csv
+mercadolocal_br/sales_20261002.csv
+mercadolocal_br/sales_20261002_02.csv
+mercadolocal_br/stores_20261003.csv
+mercadolocal_br/sales_20261003.csv
+tiendaviva_es/shops_202610.json
+tiendaviva_es/orders/2026/10/06/tiendaviva_orders_20261006_01.jsonl
+tiendaviva_es/orders/2026/10/06/tiendaviva_orders_20261006_02.jsonl
+tiendaviva_es/orders/2026/10/07/tiendaviva_orders_20261007_01.jsonl
+tiendaviva_es/orders/2026/10/07/tiendaviva_orders_20261007_02.jsonl
