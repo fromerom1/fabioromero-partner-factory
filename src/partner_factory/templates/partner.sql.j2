@@ -1,0 +1,60 @@
+-- Loader objects of partner {{ partner.partner_code }} in {{ platform.environment }}.
+-- Generated from partners/{{ partner.prefix }}.yml. Run by the service user, which owns them.
+-- Every statement is idempotent: deploying twice changes nothing.
+
+CREATE DATABASE IF NOT EXISTS {{ database }}
+    COMMENT = {{ (partner.display_name ~ ': partner factory, ' ~ platform.environment) | literal }};
+
+CREATE SCHEMA IF NOT EXISTS {{ database }}.RAW
+    COMMENT = 'Records exactly as delivered by the partner. Append-only, loaded by Snowpipe';
+
+CREATE SCHEMA IF NOT EXISTS {{ database }}.PROCESSED
+    COMMENT = 'Standard model: validated, deduplicated and normalized';
+
+CREATE SCHEMA IF NOT EXISTS {{ database }}.ANALYTICS
+    COMMENT = 'Reporting layer';
+
+CREATE STAGE IF NOT EXISTS {{ database }}.RAW.LANDING
+    URL = {{ landing_url | literal }}
+    STORAGE_INTEGRATION = {{ sf.storage_integration }}
+    COMMENT = 'Where the partner delivers files';
+{% for source in sources %}
+
+-- Source "{{ source.name }}"
+CREATE FILE FORMAT IF NOT EXISTS {{ database }}.RAW.{{ source.file_format }}
+    {{ source.file_format_options | join('\n    ') }};
+
+-- Same shape for every source and format: the record as a VARIANT plus where it came from.
+-- Nothing is typed or rejected here, so a bad row never blocks a load.
+CREATE TABLE IF NOT EXISTS {{ database }}.RAW.{{ source.table }} (
+    RECORD              VARIANT        COMMENT 'One delivered record, untyped',
+    SOURCE_FILE         VARCHAR        COMMENT 'Path of the file in the bucket',
+    FILE_ROW_NUMBER     NUMBER(38, 0)  COMMENT 'Position of the record in the file, starting at 1',
+    FILE_LAST_MODIFIED  TIMESTAMP_NTZ  COMMENT 'When the partner delivered the file (UTC)',
+    FILE_CONTENT_KEY    VARCHAR        COMMENT 'Checksum of the file content, to tell re-sent files apart',
+    LOADED_AT           TIMESTAMP_LTZ  COMMENT 'When the platform loaded the record'
+)
+    COMMENT = {{ (partner.partner_code ~ ' / ' ~ source.name ~ ': ' ~ source.description) | literal }};
+
+-- LOADED_AT uses METADATA$START_SCAN_TIME: inside a pipe CURRENT_TIMESTAMP is evaluated when
+-- the load is compiled, not when the file is loaded.
+CREATE PIPE IF NOT EXISTS {{ database }}.RAW.{{ source.pipe }}
+    AUTO_INGEST = TRUE
+    COMMENT = {{ ('Loads ' ~ source.name ~ ' files of ' ~ partner.partner_code ~ ' as they arrive') | literal }}
+AS
+COPY INTO {{ database }}.RAW.{{ source.table }}
+    (RECORD, SOURCE_FILE, FILE_ROW_NUMBER, FILE_LAST_MODIFIED, FILE_CONTENT_KEY, LOADED_AT)
+FROM (
+    SELECT
+        {{ source.record_expression }},
+        METADATA$FILENAME,
+        METADATA$FILE_ROW_NUMBER,
+        METADATA$FILE_LAST_MODIFIED,
+        METADATA$FILE_CONTENT_KEY,
+        METADATA$START_SCAN_TIME
+    FROM @{{ database }}.RAW.LANDING
+)
+PATTERN = {{ source.file_pattern | literal }}
+FILE_FORMAT = (FORMAT_NAME = {{ (database ~ '.RAW.' ~ source.file_format) | literal }})
+ON_ERROR = CONTINUE;
+{% endfor %}
