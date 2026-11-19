@@ -70,7 +70,7 @@ def _sales(stores: list[tuple[str, str, str]], day: datetime, count: int) -> lis
     ]
 
 
-def mercadolocal_br() -> None:
+def mercadolocal_br() -> dict:
     out = ROOT / "mercadolocal_br"
     stores = [_store(number) for number in range(1, 9)]
     lines = [",".join(store) for store in stores]
@@ -141,6 +141,7 @@ def mercadolocal_br() -> None:
             _csv(_sale(stores[2][1], day3)) + ",unexpected",  # one field too many
         ],
     )
+    return {"stores": stores, "first_day": first}
 
 
 # --- Partner #2: TIENDAVIVA_ES, JSON ----------------------------------------------------------
@@ -206,7 +207,7 @@ def _jsonl(events: list[dict]) -> list[str]:
     return [json.dumps(event, ensure_ascii=False, separators=(",", ":")) for event in events]
 
 
-def tiendaviva_es() -> None:
+def tiendaviva_es() -> dict:
     out = ROOT / "tiendaviva_es"
     snapshot = {
         "snapshot_month": "2026-10",
@@ -267,6 +268,59 @@ def tiendaviva_es() -> None:
         out / "orders/2026/10/07/tiendaviva_orders_20261007_02.jsonl",
         _jsonl([*_orders(day2, 6), amended]),  # the older version arrives last
     )
+    return {"first_day": first, "amended": amended_v2}
+
+
+# --- A later delivery ---------------------------------------------------------------------------
+# Arrives after the first files have been processed, to exercise the incremental run. It uses
+# its own random sequence, so adding to it never changes the files above.
+
+
+def later_delivery(brazil: dict, spain: dict) -> None:
+    global RNG
+    RNG = random.Random(20261004)
+    stores = brazil["stores"]
+    day = datetime(2026, 10, 4)
+
+    _write(
+        ROOT / "mercadolocal_br/sales_20261004.csv",
+        [
+            SALES_HEADER,
+            *map(_csv, _sales(stores, day, 6)),
+            # Notations the declared money format does not accept: all invalid, none reread.
+            *(
+                _csv(_sale(stores[0][1], day.replace(hour=10), amount=amount))
+                for amount in ("63,98", "1.250,00", "abc63.98", "1,2,3.45", "1e3", "63.987")
+            ),
+        ],
+    )
+    # A correction of a transaction processed days ago, plus one new sale. The partner first
+    # re-sends it under the name of the file above, which Snowpipe does not load again, and
+    # then under a new name.
+    _write(
+        ROOT / "mercadolocal_br/sales_20261004_02.csv",
+        [
+            SALES_HEADER,
+            _csv(brazil["first_day"][10] | {"amount": "$25.00"}),
+            _csv(_sale(stores[1][1], day.replace(hour=17))),
+        ],
+    )
+
+    day = datetime(2026, 10, 8)
+    amended = spain["amended"]
+    older_version = _update(amended, datetime(2026, 10, 6, 21), "COMPLETED") | {"total_cents": 111}
+    _write(
+        ROOT / "tiendaviva_es/orders/2026/10/08/tiendaviva_orders_20261008_01.jsonl",
+        _jsonl(
+            [
+                *_orders(day, 5),
+                # A correction: newer than the stored version, so it replaces it.
+                _update(spain["first_day"][1], day.replace(hour=9), "REFUNDED"),
+                # Older than the stored version of this order: it must not replace it.
+                older_version,
+            ]
+        ),
+    )
 
 
 # The order in which the partners deliver. "Last received wins" depends on it, so the files are
@@ -284,12 +338,15 @@ DELIVERY_ORDER = [
     "tiendaviva_es/orders/2026/10/06/tiendaviva_orders_20261006_02.jsonl",
     "tiendaviva_es/orders/2026/10/07/tiendaviva_orders_20261007_01.jsonl",
     "tiendaviva_es/orders/2026/10/07/tiendaviva_orders_20261007_02.jsonl",
+    # Later delivery
+    "mercadolocal_br/sales_20261004.csv",
+    "mercadolocal_br/sales_20261004_02.csv",
+    "tiendaviva_es/orders/2026/10/08/tiendaviva_orders_20261008_01.jsonl",
 ]
 
 
 if __name__ == "__main__":
-    mercadolocal_br()
-    tiendaviva_es()
+    later_delivery(mercadolocal_br(), tiendaviva_es())
     written = {
         str(path.relative_to(ROOT))
         for partner in ("mercadolocal_br", "tiendaviva_es")

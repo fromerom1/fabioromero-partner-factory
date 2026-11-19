@@ -1,0 +1,3 @@
+store_token,transaction_id,receipt_token,transaction_time,amount,source_id,user_role
+941707dc-6455-4fdf-a1cc-719db7052664,83368aef-af2f-497b-9082-28509640034a,5p6YRQEd,20261001T162400.000,$25.00,5a7cd051-b158-42b8-b99d-74f2061353ab,Cashier
+941707dc-6455-4fdf-a1cc-719db7052664,b5eff919-4c69-4ab7-88fc-95f27807cb52,NOK3e,20261004T170000.000,$233.56,ddb53834-13d1-4126-bfba-99c02c4ea827,Self-checkout
