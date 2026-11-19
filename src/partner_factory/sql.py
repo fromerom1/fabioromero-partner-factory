@@ -39,7 +39,7 @@ _templates = Environment(
 )
 _templates.filters["literal"] = literal
 
-SCHEMAS = ("RAW", "PROCESSED", "ANALYTICS")
+PSEUDONYMIZATION_KEY_TABLE = "PSEUDONYMIZATION_KEY"
 
 
 @dataclass(frozen=True)
@@ -132,5 +132,6 @@ def partner_sql(platform: Platform, partner: Partner) -> str:
         partner=partner,
         database=platform.database(partner),
         landing_url=platform.landing_url(partner),
+        key_table=PSEUDONYMIZATION_KEY_TABLE,
         sources=[source_objects(name, source) for name, source in partner.sources.items()],
     )

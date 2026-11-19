@@ -18,6 +18,19 @@ CREATE STAGE IF NOT EXISTS {{ database }}.RAW.LANDING
     URL = {{ landing_url | literal }}
     STORAGE_INTEGRATION = {{ sf.storage_integration }}
     COMMENT = 'Where the partner delivers files';
+
+-- Secret used to pseudonymize customer identifiers, one per partner so that references cannot
+-- be linked across partners. It lives in RAW, the one schema that is never granted to readers,
+-- and is generated inside Snowflake: it never exists in a file, a log or this repository.
+CREATE TABLE IF NOT EXISTS {{ database }}.RAW.{{ key_table }} (
+    KEY_VALUE   VARCHAR        NOT NULL,
+    CREATED_AT  TIMESTAMP_LTZ  NOT NULL
+)
+    COMMENT = 'Pseudonymization key of the partner. Deleting it makes every customer_ref unlinkable';
+
+INSERT INTO {{ database }}.RAW.{{ key_table }} (KEY_VALUE, CREATED_AT)
+SELECT SHA2(CONCAT(UUID_STRING(), UUID_STRING()), 256), CURRENT_TIMESTAMP()
+WHERE NOT EXISTS (SELECT 1 FROM {{ database }}.RAW.{{ key_table }});
 {% for source in sources %}
 
 -- Source "{{ source.name }}"
