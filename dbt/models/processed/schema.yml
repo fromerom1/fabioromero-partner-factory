@@ -1,0 +1,102 @@
+version: 2
+
+models:
+  - name: checked_store
+    description: >
+      Every store record delivered by the partner, typed to the standard model and judged.
+      reject_reasons is empty for valid records.
+
+  - name: checked_sales_transaction
+    description: >
+      Every sales record delivered by the partner, typed to the standard model and judged.
+      reject_reasons is empty for valid records. Feeds the standard table, the rejects and the
+      processing report.
+
+  - name: std_store
+    description: Standard model. One row per store of the partner.
+    columns:
+      - name: partner_code
+        data_tests: [not_null]
+      - name: store_id
+        description: Native store identifier at the partner.
+        data_tests: [not_null, unique]
+      - name: store_name
+        data_tests: [not_null]
+      - name: country_code
+        description: ISO 3166-1 alpha-2, from the partner configuration.
+        data_tests: [not_null]
+      - name: is_active
+        description: Whether the store is active. Null when the partner does not say.
+      - name: first_seen_at
+        description: First batch date in which the partner listed the store.
+        data_tests: [not_null]
+      - name: last_seen_at
+        description: Last batch date in which the partner listed the store.
+        data_tests: [not_null]
+
+  - name: std_sales_transaction
+    description: >
+      Standard model. One row per transaction, holding its current version. The key is
+      configured per partner (sales_transaction.key); assert_sales_transaction_key_is_unique
+      checks it.
+    columns:
+      - name: partner_code
+        data_tests: [not_null]
+      - name: transaction_id
+        data_tests: [not_null]
+      - name: store_id
+        data_tests:
+          - not_null
+          # A sale can arrive before its store is listed, or for a store never listed: the
+          # sale is kept and the gap is reported, not blocked.
+          - relationships:
+              arguments:
+                to: ref('std_store')
+                field: store_id
+              config:
+                severity: warn
+      - name: transaction_ts_utc
+        description: Time of the sale in UTC.
+        data_tests: [not_null]
+      - name: transaction_date_local
+        description: Date of the sale in the partner's local time.
+        data_tests: [not_null]
+      - name: amount
+        data_tests: [not_null]
+      - name: currency_code
+        description: ISO 4217. The partner's currency when the record carries none.
+        data_tests: [not_null]
+      - name: status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [COMPLETED, REFUNDED, PENDING, CANCELLED]
+      - name: customer_ref
+        description: >
+          Pseudonymous customer reference: a hash of the customer identifier keyed with the
+          partner's secret. Null when the partner sends no customer data.
+      - name: batch_date
+        description: Batch date of the file the current version came from.
+        data_tests: [not_null]
+      - name: source_file
+        data_tests: [not_null]
+      - name: loaded_at
+        description: When the platform loaded the current version into RAW (UTC).
+        data_tests: [not_null]
+      - name: source_row_number
+        description: Position of the record in source_file. With source_file, points at RAW.
+      - name: source_file_modified_at
+        description: When the partner delivered the file (UTC). First criterion of "last received".
+      - name: source_updated_at_utc
+        description: Version time sent by the partner, in UTC. Null when the partner sends none.
+
+  - name: rejected_record
+    description: Records that failed validation, with the reasons, pointing at the record in RAW.
+    columns:
+      - name: source_file
+        data_tests: [not_null]
+      - name: source_row_number
+        data_tests: [not_null]
+      - name: reject_reasons
+        data_tests: [not_null]

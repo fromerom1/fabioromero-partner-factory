@@ -6,6 +6,8 @@
 *.pem
 *.key
 profiles.yml
+# The project profile holds no credentials, only references to environment variables
+!dbt/profiles.yml
 .snowflake/
 .aws/
 

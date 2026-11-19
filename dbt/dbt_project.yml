@@ -1,0 +1,23 @@
+name: partner_factory
+version: "1.0.0"
+config-version: 2
+profile: partner_factory
+
+model-paths: [models]
+macro-paths: [macros]
+test-paths: [tests]
+clean-targets: [target, dbt_packages]
+
+# One project for every partner. It is always run through `factory dbt <PARTNER> ...`, which
+# selects the partner database and passes the variables compiled from partners/<partner>.yml:
+# partner_code, country_code, currency_code, timezone, store and sales_transaction.
+vars:
+  # How far back from the newest processed record the incremental models read again, to pick
+  # up records that Snowpipe committed out of order.
+  raw_lookback_hours: 24
+
+models:
+  partner_factory:
+    processed:
+      +schema: PROCESSED
+      +materialized: table
