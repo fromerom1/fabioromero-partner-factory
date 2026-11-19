@@ -1,0 +1,131 @@
+version: 2
+
+models:
+  - name: rpt_batch_processing
+    description: >
+      Report 1. Per batch date: records received, valid and rejected across every source of
+      the partner, and when the platform last loaded data for it. Last 40 batch dates; read it
+      ordered by batch_date descending.
+    columns:
+      - name: snapshot_date
+        description: Day the report was produced, in the partner's time zone.
+        data_tests: [not_null]
+      - name: batch_date
+        data_tests: [not_null]
+      - name: raw_records
+        description: Records delivered for the batch date. Header lines are not records.
+        data_tests: [not_null]
+      - name: valid_records
+        data_tests: [not_null]
+      - name: rejected_records
+        data_tests: [not_null]
+      - name: processing_date
+        description: Date (UTC) of the last load of a file of this batch date.
+        data_tests: [not_null]
+
+  - name: rpt_daily_sales
+    description: >
+      Report 2. Sales by transaction date for the last 40 dates with sales. Sales are completed
+      transactions, dated in the partner's local time, in the partner's currency.
+    columns:
+      - name: snapshot_date
+        data_tests: [not_null]
+      - name: transaction_date
+        data_tests: [not_null]
+      - name: stores_with_sales
+        data_tests: [not_null]
+      - name: total_sales
+        data_tests: [not_null]
+      - name: average_sale
+        data_tests: [not_null]
+      - name: month_to_date_sales
+        description: Sales of the calendar month up to and including the transaction date.
+        data_tests: [not_null]
+
+  - name: rpt_top_stores
+    description: >
+      Report 3. The five stores with most sales on each of the last 10 dates with sales. Ties
+      are broken by store_id, so a date has at most five rows.
+    columns:
+      - name: snapshot_date
+        data_tests: [not_null]
+      - name: transaction_date
+        data_tests: [not_null]
+      - name: sales_rank
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+                quote: false
+      - name: total_sales
+        data_tests: [not_null]
+      - name: store_id
+        data_tests: [not_null]
+      - name: store_name
+        description: Null when the store has sales but the partner has not listed it.
+
+unit_tests:
+  - name: month_to_date_counts_the_days_the_report_no_longer_shows
+    description: >
+      With the report cut to two dates, the first one still accumulates the sales of the
+      earlier day of its month, and a new month starts from zero. Refunds are not sales.
+    model: rpt_daily_sales
+    overrides:
+      macros:
+        is_incremental: false
+      vars:
+        snapshot_date: "2026-11-03"
+        sales_report_dates: 2
+    given:
+      - input: ref('std_sales_transaction')
+        rows:
+          - {transaction_date_local: "2026-10-29", store_id: A, amount: 100, status: COMPLETED}
+          - {transaction_date_local: "2026-10-30", store_id: A, amount: 10, status: COMPLETED}
+          - {transaction_date_local: "2026-10-30", store_id: B, amount: 20, status: COMPLETED}
+          - {transaction_date_local: "2026-10-30", store_id: B, amount: 999, status: REFUNDED}
+          - {transaction_date_local: "2026-11-02", store_id: A, amount: 7, status: COMPLETED}
+    expect:
+      rows:
+        - snapshot_date: "2026-11-03"
+          transaction_date: "2026-10-30"
+          stores_with_sales: 2
+          total_sales: 30
+          average_sale: 15
+          month_to_date_sales: 130
+        - snapshot_date: "2026-11-03"
+          transaction_date: "2026-11-02"
+          stores_with_sales: 1
+          total_sales: 7
+          average_sale: 7
+          month_to_date_sales: 7
+
+  - name: a_date_never_has_more_stores_than_the_top_allows
+    description: >
+      Stores tied in sales take consecutive positions ordered by store_id, the top is cut at
+      the configured size, only the most recent dates are kept and an unlisted store keeps
+      its place with no name.
+    model: rpt_top_stores
+    overrides:
+      macros:
+        is_incremental: false
+      vars:
+        snapshot_date: "2026-11-03"
+        top_stores_report_dates: 1
+        top_stores_per_date: 2
+    given:
+      - input: ref('std_sales_transaction')
+        rows:
+          - {transaction_date_local: "2026-11-01", store_id: OLD, amount: 500, status: COMPLETED}
+          - {transaction_date_local: "2026-11-02", store_id: C, amount: 50, status: COMPLETED}
+          - {transaction_date_local: "2026-11-02", store_id: B, amount: 30, status: COMPLETED}
+          - {transaction_date_local: "2026-11-02", store_id: B, amount: 20, status: COMPLETED}
+          - {transaction_date_local: "2026-11-02", store_id: A, amount: 50, status: COMPLETED}
+          - {transaction_date_local: "2026-11-02", store_id: D, amount: 900, status: CANCELLED}
+      - input: ref('std_store')
+        rows:
+          - {store_id: B, store_name: Store B}
+    expect:
+      rows:
+        - {transaction_date: "2026-11-02", sales_rank: 1, total_sales: 50, store_id: A, store_name: null}
+        - {transaction_date: "2026-11-02", sales_rank: 2, total_sales: 50, store_id: B, store_name: Store B}
