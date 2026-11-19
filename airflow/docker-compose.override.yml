@@ -1,0 +1,10 @@
+# Local development only. Gives Airflow the repository and the private key of the service user.
+# Start with:  FACTORY_SNOWFLAKE_KEY=/absolute/path/to/svc_dev_rsa_key.p8 astro dev start
+services:
+  scheduler:
+    volumes:
+      - ..:/usr/local/airflow/partner-factory
+      - ${FACTORY_SNOWFLAKE_KEY:?set FACTORY_SNOWFLAKE_KEY to the private key file of the service user}:/usr/local/airflow/secrets/snowflake_key.p8:ro
+  dag-processor:
+    volumes:
+      - ..:/usr/local/airflow/partner-factory
