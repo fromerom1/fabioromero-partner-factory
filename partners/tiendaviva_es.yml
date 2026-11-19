@@ -3,6 +3,9 @@ display_name: TiendaViva (Spain)
 country_code: ES
 currency_code: EUR
 timezone: Europe/Madrid
+# The Canary Islands are one hour behind the mainland all year.
+store_timezones:
+  TV-0047: Atlantic/Canary
 
 sources:
   orders:
@@ -37,7 +40,7 @@ standard_model:
       transaction_ts: {from: order.created_at, format: "DD/MM/YYYY HH24:MI:SS"}
       # An order is sent again when it changes: the latest updated_at wins.
       updated_at: {from: order.updated_at, format: "DD/MM/YYYY HH24:MI:SS"}
-      amount: {from: total_cents, transforms: [cents_to_units]}
+      amount: {from: total_cents, money: {unit: cents}}
       currency_code: {from: currency}
       status: {from: order.status}
       # The only customer field that leaves RAW, and only as a keyed hash. Email and phone

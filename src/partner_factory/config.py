@@ -73,6 +73,23 @@ ConstantText = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_][A-Za-z0-
 BATCH_DATE_FORMATS = {"YYYYMMDD": "%Y%m%d", "YYYYMM": "%Y%m"}
 
 
+def _timezone_exists(timezone: str) -> str:
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError(f"unknown IANA time zone '{timezone}'") from error
+    return timezone
+
+
+TimeZone = Annotated[
+    str,
+    StringConstraints(pattern=r"^[A-Za-z0-9_+/-]{1,64}$"),
+    AfterValidator(_timezone_exists),
+]
+# A store identifier as it appears in the standard model, after the mapping's transforms.
+StoreId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:-]{1,100}$")]
+
+
 class StrictModel(BaseModel):
     """Unknown keys are errors: a typo in a YAML must fail validation, not be ignored."""
 
@@ -156,6 +173,31 @@ class Source(StrictModel):
         return self
 
 
+class MoneyFormat(StrictModel):
+    """How the partner writes an amount. A value that does not fit exactly is invalid.
+
+    Declared rather than guessed: `63,98` is sixty-three euros in one notation and six thousand
+    in another, and stripping separators would silently pick one.
+    """
+
+    unit: Literal["units", "cents"] = "units"
+    """`cents` is an integer number of minor units, with no symbol or separators."""
+    symbol: Literal["$", "R$", "US$", "€", "£"] | None = None
+    """Optional currency symbol in front of the number."""
+    thousands: Literal[",", ".", " "] | None = None
+    """Optional grouping separator. When present, groups must be of exactly three digits."""
+    decimal: Literal[".", ","] = "."
+    """Decimal separator. At most two decimals are accepted, never rounded."""
+
+    @model_validator(mode="after")
+    def _is_consistent(self) -> MoneyFormat:
+        if self.thousands == self.decimal:
+            raise ValueError("thousands and decimal separators must differ")
+        if self.unit == "cents" and (self.symbol or self.thousands or self.decimal != "."):
+            raise ValueError("cents are plain integers: no symbol or separators")
+        return self
+
+
 class FieldMapping(StrictModel):
     """Where one field of the standard model comes from and how the partner writes it."""
 
@@ -169,6 +211,8 @@ class FieldMapping(StrictModel):
     """Applied in order, from the catalog in standard_model.TRANSFORM_KINDS."""
     format: TimestampFormat | None = None
     """Snowflake format of a timestamp field."""
+    money: MoneyFormat | None = None
+    """Notation of an amount field."""
     matches: SqlLiteralSafe | None = None
     """Regular expression a text value must match completely to be valid."""
     value_map: dict[ConstantText, ConstantText] | None = None
@@ -179,9 +223,9 @@ class FieldMapping(StrictModel):
         if (self.source is None) == (self.constant is None):
             raise ValueError("set exactly one of 'from' and 'constant'")
         if self.constant is not None and (
-            self.transforms or self.format or self.matches or self.value_map
+            self.transforms or self.format or self.money or self.matches or self.value_map
         ):
-            raise ValueError("a constant takes no transforms, format, matches or value_map")
+            raise ValueError("a constant takes no transforms, format, money, matches or value_map")
         return self
 
 
@@ -220,6 +264,10 @@ def _field_problem(field: StandardField, mapping: FieldMapping) -> str | None:
         return "a timestamp field needs a 'format', and cannot be a constant"
     if field.kind != "timestamp" and mapping.format:
         return "'format' only applies to timestamp fields"
+    if field.kind == "amount" and not mapping.money:
+        return "an amount field needs 'money', the notation the partner writes amounts in"
+    if field.kind != "amount" and mapping.money:
+        return "'money' only applies to amount fields"
     if field.kind != "text" and mapping.matches:
         return "'matches' only applies to text fields"
     if field.kind != "status" and mapping.value_map:
@@ -242,19 +290,12 @@ class Partner(StrictModel):
     """ISO 3166-1 alpha-2."""
     currency_code: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
     """ISO 4217. Default currency of the partner's amounts."""
-    timezone: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_+/-]{1,64}$")]
+    timezone: TimeZone
     """IANA zone of the partner's local timestamps."""
+    store_timezones: dict[StoreId, TimeZone] = {}
+    """Stores whose local time is not the partner's, by standard store_id."""
     sources: Annotated[dict[FieldName, Source], Field(min_length=1)]
     standard_model: StandardModelMapping
-
-    @field_validator("timezone")
-    @classmethod
-    def _timezone_exists(cls, timezone: str) -> str:
-        try:
-            ZoneInfo(timezone)
-        except (ZoneInfoNotFoundError, ValueError) as error:
-            raise ValueError(f"unknown IANA time zone '{timezone}'") from error
-        return timezone
 
     @model_validator(mode="after")
     def _sources_do_not_overlap(self) -> Partner:

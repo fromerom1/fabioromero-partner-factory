@@ -39,7 +39,7 @@ VALID = {
                 "transaction_id": {"from": "id"},
                 "store_id": {"from": "shop.id"},
                 "transaction_ts": {"from": "created", "format": "YYYY-MM-DD HH24:MI:SS"},
-                "amount": {"from": "total"},
+                "amount": {"from": "total", "money": {}},
                 "status": {"constant": "COMPLETED"},
             },
         },
@@ -119,6 +119,7 @@ def test_file_must_be_named_after_its_partner_code(tmp_path: Path) -> None:
 # --- Mapping to the standard model ------------------------------------------------------------
 
 FIELDS = "standard_model.sales_transaction.fields"
+AMOUNT = {"from": "total", "money": {}}
 
 
 def test_required_standard_fields_must_be_mapped() -> None:
@@ -139,11 +140,27 @@ def test_a_mapping_must_use_a_declared_source_and_its_columns() -> None:
 
 def test_field_options_must_fit_the_kind_of_field() -> None:
     _rejects(f"{FIELDS}.transaction_ts", {"from": "created"}, "needs a 'format'")
-    _rejects(f"{FIELDS}.amount", {"from": "total", "transforms": ["lower"]}, "does not apply")
-    _rejects(f"{FIELDS}.amount", {"from": "total", "transforms": ["sql"]}, "Input should be")
+    _rejects(f"{FIELDS}.amount", {"from": "total"}, "needs 'money'")
+    _rejects(f"{FIELDS}.amount", AMOUNT | {"transforms": ["lower"]}, "does not apply")
+    _rejects(f"{FIELDS}.amount", AMOUNT | {"transforms": ["sql"]}, "Input should be")
+    _rejects(f"{FIELDS}.store_id", {"from": "shop.id", "money": {}}, "only applies to amount")
     _rejects(f"{FIELDS}.status", {"constant": "PAID"}, "unknown status")
     _rejects(f"{FIELDS}.status", {"from": "s", "value_map": {"PAID": "DONE"}}, "unknown status")
-    _rejects(f"{FIELDS}.amount", {"from": "total", "constant": "1"}, "exactly one of")
+    _rejects(f"{FIELDS}.amount", AMOUNT | {"constant": "1"}, "exactly one of")
+
+
+def test_money_formats_must_be_unambiguous() -> None:
+    same = {"from": "total", "money": {"thousands": ",", "decimal": ","}}
+    _rejects(f"{FIELDS}.amount", same, "must differ")
+    cents = {"from": "total", "money": {"unit": "cents", "symbol": "$"}}
+    _rejects(f"{FIELDS}.amount", cents, "plain integers")
+    _rejects(f"{FIELDS}.amount", {"from": "total", "money": {"symbol": "'"}}, "Input should be")
+
+
+def test_store_time_zones_must_be_real_zones_of_plain_store_ids() -> None:
+    assert Partner.model_validate(_changed("store_timezones", {"S-1": "Atlantic/Canary"}))
+    _rejects("store_timezones", {"S-1": "Atlantic/Atlantis"}, "unknown IANA time zone")
+    _rejects("store_timezones", {"S'; DROP DATABASE P; --": "UTC"}, "store_timezones")
 
 
 def test_customer_data_can_only_leave_raw_pseudonymized() -> None:

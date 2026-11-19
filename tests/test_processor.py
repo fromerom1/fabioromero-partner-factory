@@ -1,13 +1,14 @@
 """From a partner mapping to the SQL expressions the dbt project runs with."""
 
 import copy
+import re
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from partner_factory import processor
-from partner_factory.config import Partner, load_partner, load_platform
+from partner_factory.config import MoneyFormat, Partner, load_partner, load_platform
 from test_config import VALID
 
 REPO = Path(__file__).parent.parent
@@ -21,17 +22,93 @@ def _fields(partner: str, entity: str) -> dict[str, dict]:
 
 
 def test_types_come_from_the_standard_model_not_from_the_partner() -> None:
-    brazil = _fields("mercadolocal_br", "sales_transaction")
     spain = _fields("tiendaviva_es", "sales_transaction")
-
-    assert brazil["amount"]["value"] == (
-        "TRY_TO_DECIMAL(REPLACE(REGEXP_REPLACE(amount__raw, '[^0-9.,+-]', ''), ',', ''), 11, 2)"
-    )
-    assert spain["amount"]["value"] == "(TRY_TO_DECIMAL(amount__raw, 11, 0) / 100)::NUMBER(11, 2)"
     assert spain["transaction_ts"]["value"] == (
         "TRY_TO_TIMESTAMP_NTZ(transaction_ts__raw, 'DD/MM/YYYY HH24:MI:SS')"
     )
     assert spain["amount"]["raw"] == "NULLIF(TRIM(src.RECORD['total_cents']::VARCHAR), '')"
+    assert spain["amount"]["value"] == (
+        "IFF(REGEXP_LIKE(amount__raw, '-?[0-9]+'),"
+        " (TRY_TO_DECIMAL(amount__raw, 11, 0) / 100)::NUMBER(11, 2), NULL)"
+    )
+
+
+# --- Amounts: validated against the declared notation, and only then cleaned --------------------
+
+DOLLARS = MoneyFormat(symbol="$", thousands=",", decimal=".")
+EUROPEAN = MoneyFormat(symbol="€", thousands=".", decimal=",")
+CENTS = MoneyFormat(unit="cents")
+
+
+@pytest.mark.parametrize(
+    ("money", "text"),
+    [
+        (DOLLARS, "$63.98"),
+        (DOLLARS, "63.98"),
+        (DOLLARS, "$1,250.00"),
+        (DOLLARS, "1250"),
+        (DOLLARS, "$ 63.9"),
+        (DOLLARS, "-$5.00"),
+        (DOLLARS, "1,250,000.50"),
+        (EUROPEAN, "63,98"),
+        (EUROPEAN, "€1.250,00"),
+        (CENTS, "6398"),
+        (CENTS, "-100"),
+    ],
+)
+def test_amounts_in_the_declared_notation_are_valid(money: MoneyFormat, text: str) -> None:
+    assert re.fullmatch(processor.amount_pattern(money), text)
+
+
+@pytest.mark.parametrize(
+    ("money", "text"),
+    [
+        (DOLLARS, "63,98"),  # decimal comma: would read as 6398
+        (DOLLARS, "1.250,00"),  # European grouping: would read as 1.25
+        (DOLLARS, "abc63.98"),
+        (DOLLARS, "63.98abc"),
+        (DOLLARS, "1,2,3.45"),  # groups that are not thousands
+        (DOLLARS, "12,50.00"),
+        (DOLLARS, "1e3"),  # scientific notation
+        (DOLLARS, "63.987"),  # a third decimal is not rounded away
+        (DOLLARS, "$"),
+        (DOLLARS, "$$5.00"),
+        (DOLLARS, "5."),
+        (DOLLARS, ".5"),
+        (DOLLARS, "€63.98"),
+        (EUROPEAN, "63.98"),
+        (EUROPEAN, "1,250.00"),
+        (CENTS, "63.98"),
+        (CENTS, "6398.5"),
+        (CENTS, "1e3"),
+        (CENTS, "$6398"),
+    ],
+)
+def test_amounts_in_any_other_notation_are_invalid(money: MoneyFormat, text: str) -> None:
+    assert not re.fullmatch(processor.amount_pattern(money), text)
+
+
+def test_an_amount_is_only_cleaned_after_it_matched_its_notation() -> None:
+    brazil = _fields("mercadolocal_br", "sales_transaction")["amount"]["value"]
+    assert brazil == (
+        "IFF(REGEXP_LIKE(amount__raw, '-?([$] ?)?([0-9]{1,3}(,[0-9]{3})+|[0-9]+)([.][0-9]{1,2})?'),"
+        " TRY_TO_DECIMAL(REPLACE(REGEXP_REPLACE(amount__raw, '[^0-9.,-]', ''), ',', ''), 11, 2),"
+        " NULL)"
+    )
+    cleaned = processor._amount(EUROPEAN, "t").split("TRY_TO_DECIMAL(")[1]
+    assert cleaned.startswith(
+        "REPLACE(REPLACE(REGEXP_REPLACE(t, '[^0-9.,-]', ''), '.', ''), ',', '.')"
+    )
+
+
+# --- Time zones ---------------------------------------------------------------------------------
+
+
+def test_local_times_use_the_zone_of_the_store_when_one_is_declared() -> None:
+    assert processor.timezone_sql(PARTNERS["mercadolocal_br"]) == "'America/Sao_Paulo'"
+    assert processor.timezone_sql(PARTNERS["tiendaviva_es"]) == (
+        "DECODE(store_id, 'TV-0047', 'Atlantic/Canary', 'Europe/Madrid')"
+    )
 
 
 def test_fields_the_partner_does_not_send_are_typed_nulls_or_constants() -> None:

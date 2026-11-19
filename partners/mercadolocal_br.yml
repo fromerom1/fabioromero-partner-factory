@@ -57,8 +57,10 @@ standard_model:
         transforms: [lower]
         matches: "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"
       transaction_ts: {from: transaction_time, format: 'YYYYMMDD"T"HH24MISS.FF3'}
+      # Written as in the partner's sample: `$63.98`. Anything else, `63,98` included, is
+      # rejected as invalid instead of being reinterpreted.
       amount:
         from: amount
-        transforms: [strip_currency_symbol, remove_thousands_separator]
+        money: {symbol: "$", thousands: ",", decimal: "."}
       # Every record is a completed sale: the partner sends no status.
       status: {constant: COMPLETED}

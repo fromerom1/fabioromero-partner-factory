@@ -10,7 +10,14 @@ literal through ``sql.literal``.
 
 from __future__ import annotations
 
-from partner_factory.config import EntityMapping, FieldMapping, Partner, Platform, Source
+from partner_factory.config import (
+    EntityMapping,
+    FieldMapping,
+    MoneyFormat,
+    Partner,
+    Platform,
+    Source,
+)
 from partner_factory.sql import EXTRA_FIELD_KEY, PSEUDONYMIZATION_KEY_TABLE, literal
 from partner_factory.standard_model import ENTITIES, SALE_STATUSES, SQL_TYPES, StandardField
 
@@ -19,10 +26,41 @@ _TEXT_TRANSFORMS = {
     "lower": "LOWER({})",
     "upper": "UPPER({})",
     "remove_spaces": "REPLACE({}, ' ', '')",
-    # Keeps digits, separators and sign: '$63.98' and 'R$ 63.98' both become '63.98'.
-    "strip_currency_symbol": "REGEXP_REPLACE({}, '[^0-9.,+-]', '')",
-    "remove_thousands_separator": "REPLACE({}, ',', '')",
 }
+
+# Separators and symbols as they are written inside a regular expression. Character classes
+# keep the pattern free of backslashes, which the SQL literal would not accept.
+_REGEX = {".": "[.]", ",": ",", " ": " ", "$": "[$]", "R$": "R[$]", "US$": "US[$]"}
+
+
+def amount_pattern(money: MoneyFormat) -> str:
+    """Regular expression an amount must match completely before anything is cleaned.
+
+    Strict on purpose: at most two decimals, groups of exactly three digits, nothing before or
+    after the number other than the declared symbol and a minus sign. Whatever does not match
+    is reported as invalid instead of being reinterpreted.
+    """
+    if money.unit == "cents":
+        return "-?[0-9]+"
+    digits = "[0-9]+"
+    if money.thousands:
+        separator = _REGEX[money.thousands]
+        digits = f"([0-9]{{1,3}}({separator}[0-9]{{3}})+|[0-9]+)"
+    symbol = f"({_REGEX.get(money.symbol, money.symbol)} ?)?" if money.symbol else ""
+    return f"-?{symbol}{digits}({_REGEX[money.decimal]}[0-9]{{1,2}})?"
+
+
+def _amount(money: MoneyFormat, text: str) -> str:
+    """Validate against the declared notation first; only a value that fits is cleaned."""
+    valid = f"REGEXP_LIKE({text}, {literal(amount_pattern(money))})"
+    if money.unit == "cents":
+        return f"IFF({valid}, (TRY_TO_DECIMAL({text}, 11, 0) / 100)::NUMBER(11, 2), NULL)"
+    number = f"REGEXP_REPLACE({text}, '[^0-9.,-]', '')"  # drops the symbol and spaces
+    if money.thousands and money.thousands != " ":
+        number = f"REPLACE({number}, {literal(money.thousands)}, '')"
+    if money.decimal == ",":
+        number = f"REPLACE({number}, ',', '.')"
+    return f"IFF({valid}, TRY_TO_DECIMAL({number}, 11, 2), NULL)"
 
 
 def _path(base: str, path: str) -> str:
@@ -65,9 +103,7 @@ def _typed_value(
         case "timestamp":
             return f"TRY_TO_TIMESTAMP_NTZ({text}, {literal(mapping.format)})"
         case "amount":
-            if "cents_to_units" in mapping.transforms:
-                return f"(TRY_TO_DECIMAL({text}, 11, 0) / 100)::NUMBER(11, 2)"
-            return f"TRY_TO_DECIMAL({text}, 11, 2)"
+            return _amount(mapping.money, text)
         case "status":
             if mapping.value_map:
                 pairs = ", ".join(
@@ -135,12 +171,24 @@ def entity_spec(platform: Platform, partner: Partner, entity_name: str) -> dict:
     return spec
 
 
+def timezone_sql(partner: Partner) -> str:
+    """The IANA zone of a record's local times, as an expression over its store_id."""
+    default = literal(partner.timezone)
+    if not partner.store_timezones:
+        return default
+    exceptions = ", ".join(
+        f"{literal(store_id)}, {literal(zone)}"
+        for store_id, zone in partner.store_timezones.items()
+    )
+    return f"DECODE(store_id, {exceptions}, {default})"
+
+
 def dbt_vars(platform: Platform, partner: Partner) -> dict:
     """The complete ``--vars`` of a dbt invocation for one partner."""
     return {
         "partner_code": partner.partner_code,
         "country_code": partner.country_code,
         "currency_code": partner.currency_code,
-        "timezone": partner.timezone,
+        "timezone_sql": timezone_sql(partner),
         **{name: entity_spec(platform, partner, name) for name in ENTITIES},
     }

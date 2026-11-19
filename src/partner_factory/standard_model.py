@@ -24,25 +24,15 @@ SQL_TYPES: dict[Kind, str] = {
 
 SALE_STATUSES = ("COMPLETED", "REFUNDED", "PENDING", "CANCELLED")
 
-Transform = Literal[
-    "lower",
-    "upper",
-    "remove_spaces",
-    "strip_currency_symbol",
-    "remove_thousands_separator",
-    "cents_to_units",
-    "pseudonymize",
-]
+Transform = Literal["lower", "upper", "remove_spaces", "pseudonymize"]
 
 # The catalog of transformations a partner file can ask for, and the kinds of field each one
-# applies to. Anything outside the catalog is a code change, not configuration.
+# applies to. Anything outside the catalog is a code change, not configuration. Amounts and
+# timestamps take no transforms: they are parsed against a declared format instead.
 TRANSFORM_KINDS: dict[str, tuple[Kind, ...]] = {
     "lower": ("text", "status", "currency", "pseudonym"),
     "upper": ("text", "status", "currency", "pseudonym"),
-    "remove_spaces": ("text", "amount", "pseudonym"),
-    "strip_currency_symbol": ("amount",),
-    "remove_thousands_separator": ("amount",),
-    "cents_to_units": ("amount",),
+    "remove_spaces": ("text", "pseudonym"),
     "pseudonymize": ("pseudonym",),
 }
 
