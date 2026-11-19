@@ -12,13 +12,16 @@ Run from the repository root::
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from pydantic import ValidationError
 
-from partner_factory import sql
+from partner_factory import processor, sql
 from partner_factory.config import Partner, Platform, load_partner, load_platform
 from partner_factory.connection import (
     MissingCredentials,
@@ -38,6 +41,7 @@ app.add_typer(platform_app, name="platform")
 
 PARTNERS_DIR = Path("partners")
 PLATFORM_DIR = Path("platform")
+DBT_DIR = Path("dbt")
 
 EnvOption = Annotated[
     str,
@@ -160,6 +164,41 @@ def load_status(partner_code: str, env: EnvOption = "dev") -> None:
             _print_table(query(connection, f"{per_file}\nORDER BY SOURCE, SOURCE_FILE"))
     except MissingCredentials as error:
         raise _fail(str(error)) from error
+
+
+@app.command("dbt-vars")
+def dbt_vars(partner_code: str, env: EnvOption = "dev") -> None:
+    """Print what the partner file compiles to: the variables dbt runs with."""
+    platform, partner = _platform(env), _partner(partner_code)
+    typer.echo(json.dumps(processor.dbt_vars(platform, partner), indent=2))
+
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def dbt(ctx: typer.Context, partner_code: str, env: EnvOption = "dev") -> None:
+    """Run dbt for one partner, for example: factory dbt MERCADOLOCAL_BR build
+
+    The dbt project is the same for every partner. This command points it at the partner's
+    database and passes the variables compiled from the partner file.
+    """
+    platform, partner = _platform(env), _partner(partner_code)
+    if not ctx.args:
+        raise _fail("add a dbt command, for example: factory dbt MERCADOLOCAL_BR build")
+    command = [
+        str(Path(sys.executable).parent / "dbt"),  # the dbt of this environment, not of PATH
+        *ctx.args,
+        *("--project-dir", str(DBT_DIR), "--profiles-dir", str(DBT_DIR)),
+        # Relative to the project: one target directory per partner keeps their artifacts apart.
+        *("--target-path", f"target/{partner.prefix}"),
+        *("--vars", json.dumps(processor.dbt_vars(platform, partner))),
+    ]
+    environment = os.environ | {
+        "FACTORY_SNOWFLAKE_ACCOUNT": platform.snowflake.account,
+        "FACTORY_SNOWFLAKE_USER": platform.snowflake.service_user,
+        "FACTORY_SNOWFLAKE_ROLE": platform.snowflake.pipeline_role,
+        "FACTORY_SNOWFLAKE_WAREHOUSE": platform.snowflake.warehouse,
+        "FACTORY_DATABASE": platform.database(partner),
+    }
+    raise typer.Exit(code=subprocess.run(command, env=environment, check=False).returncode)
 
 
 @platform_app.command()

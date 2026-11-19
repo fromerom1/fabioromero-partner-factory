@@ -1,0 +1,17 @@
+# No credentials here: `factory dbt` sets the FACTORY_* variables from platform/<env>.yml, and
+# the private key is read from the path in SNOWFLAKE_PRIVATE_KEY_FILE.
+partner_factory:
+  target: factory
+  outputs:
+    factory:
+      type: snowflake
+      account: "{{ env_var('FACTORY_SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('FACTORY_SNOWFLAKE_USER') }}"
+      role: "{{ env_var('FACTORY_SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('FACTORY_SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('FACTORY_DATABASE') }}"
+      schema: PROCESSED
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_FILE') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
+      threads: 4
+      query_tag: partner_factory_dbt

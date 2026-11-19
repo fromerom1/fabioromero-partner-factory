@@ -1,0 +1,192 @@
+# Unit tests of the standard sales table. They mock the checked records and override the
+# partner variables, so they prove the logic once, for every partner, without touching data.
+unit_tests:
+  - name: local_times_are_converted_with_the_zone_of_the_store
+    description: >
+      15:05 on the mainland is 13:05 UTC; 15:05 in a store declared in Atlantic/Canary is
+      14:05 UTC. The partner's version time follows the same rule, and the local date is kept.
+    model: std_sales_transaction
+    overrides:
+      macros:
+        is_incremental: false
+      vars:
+        partner_code: UNIT
+        currency_code: EUR
+        timezone_sql: "DECODE(store_id, 'CANARY', 'Atlantic/Canary', 'Europe/Madrid')"
+        raw_lookback_hours: 0
+        sales_transaction:
+          key: [transaction_id]
+    given:
+      - input: ref('checked_sales_transaction')
+        format: sql
+        rows: |
+          select 'MAINLAND' as transaction_id, 'TV-1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, '2026-10-07 00:30:00'::timestamp_ntz as updated_at,
+            10::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'f1' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'ISLAND' as transaction_id, 'CANARY' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, '2026-10-07 00:30:00'::timestamp_ntz as updated_at,
+            10::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'f1' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+    expect:
+      rows:
+        - transaction_id: MAINLAND
+          transaction_ts_utc: "2026-10-06 13:05:00"
+          transaction_date_local: "2026-10-06"
+          source_updated_at_utc: "2026-10-06 22:30:00"
+          currency_code: EUR
+        - transaction_id: ISLAND
+          transaction_ts_utc: "2026-10-06 14:05:00"
+          transaction_date_local: "2026-10-06"
+          source_updated_at_utc: "2026-10-06 23:30:00"
+          currency_code: EUR
+
+  - name: last_received_wins_by_delivery_time_then_file_then_row
+    description: >
+      Without a version from the partner, the current record of a key is the one in the file
+      delivered last; files delivered in the same instant are ordered by path, and records of
+      the same file by position.
+    model: std_sales_transaction
+    overrides:
+      macros:
+        is_incremental: false
+      vars:
+        partner_code: UNIT
+        currency_code: EUR
+        timezone_sql: "DECODE(store_id, 'CANARY', 'Atlantic/Canary', 'Europe/Madrid')"
+        raw_lookback_hours: 0
+        sales_transaction:
+          key: [transaction_id]
+    given:
+      - input: ref('checked_sales_transaction')
+        format: sql
+        rows: |
+          select 'BY_TIME' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, null::timestamp_ntz as updated_at,
+            1::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'z_first' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'BY_TIME' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, null::timestamp_ntz as updated_at,
+            2::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'a_second' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:05'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'BY_FILE' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, null::timestamp_ntz as updated_at,
+            1::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'a' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'BY_FILE' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, null::timestamp_ntz as updated_at,
+            2::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'b' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'BY_ROW' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, null::timestamp_ntz as updated_at,
+            1::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'a' as source_file, 7 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'BY_ROW' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, null::timestamp_ntz as updated_at,
+            2::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'a' as source_file, 9 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+    expect:
+      rows:
+        - {transaction_id: BY_TIME, amount: 2, source_file: a_second, source_row_number: 1}
+        - {transaction_id: BY_FILE, amount: 2, source_file: b, source_row_number: 1}
+        - {transaction_id: BY_ROW, amount: 2, source_file: a, source_row_number: 9}
+
+  - name: the_latest_version_wins_whatever_arrives_last
+    description: >
+      When the partner versions its records, an older version delivered later does not replace
+      a newer one, in the same run or against a row stored by a previous run.
+    model: std_sales_transaction
+    overrides:
+      macros:
+        is_incremental: true
+      vars:
+        partner_code: UNIT
+        currency_code: EUR
+        timezone_sql: "DECODE(store_id, 'CANARY', 'Atlantic/Canary', 'Europe/Madrid')"
+        raw_lookback_hours: 0
+        sales_transaction:
+          key: [transaction_id]
+    given:
+      - input: ref('checked_sales_transaction')
+        format: sql
+        rows: |
+          select 'SAME_RUN' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, '2026-10-07 10:00:00'::timestamp_ntz as updated_at,
+            2::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'early' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 10:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'SAME_RUN' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, '2026-10-06 20:00:00'::timestamp_ntz as updated_at,
+            1::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'late' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 11:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'STORED_IS_NEWER' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, '2026-10-06 20:00:00'::timestamp_ntz as updated_at,
+            1::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'late' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 11:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+          union all
+          select 'STORED_IS_OLDER' as transaction_id, 'S1' as store_id,
+            '2026-10-06 15:05:00'::timestamp_ntz as transaction_ts, '2026-10-07 12:00:00'::timestamp_ntz as updated_at,
+            2::number(11, 2) as amount, 'COMPLETED' as status, null::varchar as currency_code,
+            null::varchar as customer_ref, '2026-10-06'::date as batch_date,
+            'late' as source_file, 1 as source_row_number, null::integer as source_element_index,
+            '2026-10-07 11:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-08 00:00:00'::timestamp_ntz as loaded_at, array_construct() as reject_reasons
+      - input: this
+        format: sql
+        rows: |
+          select 'UNIT' as partner_code, 'STORED_IS_NEWER' as transaction_id, 'S1' as store_id,
+            '2026-10-06 13:05:00'::timestamp_ntz as transaction_ts_utc, '2026-10-06'::date as transaction_date_local,
+            2::number(11, 2) as amount, 'EUR' as currency_code, 'COMPLETED' as status, null::varchar as customer_ref,
+            '2026-10-06'::date as batch_date, 'stored' as source_file, '2026-10-01 00:00:00'::timestamp_ntz as loaded_at,
+            1 as source_row_number, '2026-10-07 09:00:00'::timestamp_ntz as source_file_modified_at,
+            '2026-10-07 08:00:00'::timestamp_ntz as source_updated_at_utc
+          union all
+          select 'UNIT', 'STORED_IS_OLDER', 'S1', '2026-10-06 13:05:00'::timestamp_ntz, '2026-10-06'::date,
+            1::number(11, 2), 'EUR', 'COMPLETED', null::varchar, '2026-10-06'::date, 'stored',
+            '2026-10-01 00:00:00'::timestamp_ntz, 1, '2026-10-07 09:00:00'::timestamp_ntz,
+            '2026-10-06 08:00:00'::timestamp_ntz
+    expect:
+      rows:
+        - {transaction_id: SAME_RUN, amount: 2, source_file: early}
+        - {transaction_id: STORED_IS_NEWER, amount: 2, source_file: stored}
+        - {transaction_id: STORED_IS_OLDER, amount: 2, source_file: late}

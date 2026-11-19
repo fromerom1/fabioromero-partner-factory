@@ -10,6 +10,7 @@ sources:
     format: csv
     file_pattern: "(.*/)?stores_[0-9]{8}[^/]*[.]csv"
     example_file: stores_20261001.csv
+    batch_date: {regex: "stores_([0-9]{8})", format: YYYYMMDD}
     csv:
       columns: [store_group, store_token, store_name]
 
@@ -18,6 +19,7 @@ sources:
     format: csv
     file_pattern: "(.*/)?sales_[0-9]{8}[^/]*[.]csv"
     example_file: sales_20261001.csv
+    batch_date: {regex: "sales_([0-9]{8})", format: YYYYMMDD}
     csv:
       # The data dictionary lists six columns; the sample record carries a seventh, source_id,
       # between amount and user_role. The file order below follows the sample.
@@ -29,3 +31,36 @@ sources:
         - amount
         - source_id
         - user_role
+
+standard_model:
+  store:
+    source: stores
+    fields:
+      store_id:
+        from: store_token
+        transforms: [lower]
+        matches: "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+      store_name: {from: store_name}
+      # The partner does not say whether a store is active: is_active stays unknown.
+
+  sales_transaction:
+    source: sales
+    # A transaction is unique per store, not across the partner.
+    key: [store_id, transaction_id]
+    fields:
+      transaction_id:
+        from: transaction_id
+        transforms: [lower]
+        matches: "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+      store_id:
+        from: store_token
+        transforms: [lower]
+        matches: "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+      transaction_ts: {from: transaction_time, format: 'YYYYMMDD"T"HH24MISS.FF3'}
+      # Written as in the partner's sample: `$63.98`. Anything else, `63,98` included, is
+      # rejected as invalid instead of being reinterpreted.
+      amount:
+        from: amount
+        money: {symbol: "$", thousands: ",", decimal: "."}
+      # Every record is a completed sale: the partner sends no status.
+      status: {constant: COMPLETED}

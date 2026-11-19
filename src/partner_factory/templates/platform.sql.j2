@@ -17,6 +17,9 @@ CREATE USER IF NOT EXISTS {{ sf.service_user }}
 
 ALTER USER {{ sf.service_user }} SET RSA_PUBLIC_KEY = {{ service_public_key | literal }};
 
+-- Every session of the pipeline runs in UTC, whatever the account default is.
+ALTER USER {{ sf.service_user }} SET TIMEZONE = 'UTC';
+
 GRANT ROLE {{ sf.pipeline_role }} TO USER {{ sf.service_user }};
 
 -- Custom roles roll up to SYSADMIN so administrators keep visibility of what the factory creates.

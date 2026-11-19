@@ -61,6 +61,8 @@ def connect(platform: Platform, *, administrator: bool = False) -> Iterator[Snow
         private_key_file=key_file,
         private_key_file_pwd=os.environ.get("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE"),
         application="partner_factory",
+        # The administrator has its own defaults; the factory always works in UTC.
+        session_parameters={"TIMEZONE": "UTC"},
         # Short-lived sessions that run nothing asynchronous: always log out on close.
         enable_server_session_keep_alive_auto_detection=False,
     )

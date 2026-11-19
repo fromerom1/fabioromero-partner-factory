@@ -3,6 +3,9 @@ display_name: TiendaViva (Spain)
 country_code: ES
 currency_code: EUR
 timezone: Europe/Madrid
+# The Canary Islands are one hour behind the mainland all year.
+store_timezones:
+  TV-0047: Atlantic/Canary
 
 sources:
   orders:
@@ -10,9 +13,36 @@ sources:
     format: json
     file_pattern: "orders/[0-9]{4}/[0-9]{2}/[0-9]{2}/tiendaviva_orders_[0-9]{8}_[0-9]+[.]jsonl"
     example_file: orders/2026/10/06/tiendaviva_orders_20261006_01.jsonl
+    batch_date: {regex: "tiendaviva_orders_([0-9]{8})_", format: YYYYMMDD}
 
   shops:
     description: Monthly full snapshot of shops, one JSON document per file.
     format: json
     file_pattern: "(.*/)?shops_[0-9]{6}[.]json"
     example_file: shops_202610.json
+    batch_date: {regex: "shops_([0-9]{6})[.]json", format: YYYYMM}
+
+standard_model:
+  store:
+    source: shops
+    explode: shops
+    fields:
+      store_id: {from: code}
+      store_name: {from: name}
+      is_active: {from: active}
+
+  sales_transaction:
+    source: orders
+    key: [transaction_id]
+    fields:
+      transaction_id: {from: order.id}
+      store_id: {from: shop.code}
+      transaction_ts: {from: order.created_at, format: "DD/MM/YYYY HH24:MI:SS"}
+      # An order is sent again when it changes: the latest updated_at wins.
+      updated_at: {from: order.updated_at, format: "DD/MM/YYYY HH24:MI:SS"}
+      amount: {from: total_cents, money: {unit: cents}}
+      currency_code: {from: currency}
+      status: {from: order.status}
+      # The only customer field that leaves RAW, and only as a keyed hash. Email and phone
+      # are not mapped, so they stay in RAW.
+      customer_ref: {from: customer.nif, transforms: [upper, remove_spaces, pseudonymize]}
