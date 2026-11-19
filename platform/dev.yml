@@ -1,0 +1,16 @@
+# DEV environment parameters, shared by the factory (Python) and the AWS base (Terraform).
+# Identifiers only. Credentials never live in this repository: see .env.example.
+environment: DEV
+
+snowflake:
+  account: DZCEWHI-NKC53359
+  warehouse: PARTNER_FACTORY_DEV_WH
+  pipeline_role: PARTNER_FACTORY_DEV_PIPELINE
+  service_user: SVC_PARTNER_FACTORY_DEV
+  storage_integration: PARTNER_FACTORY_DEV_S3
+
+aws:
+  account_id: "909421213975"
+  region: us-east-1
+  bucket: fabioromero-partner-factory-dev
+  snowflake_role_name: partner-factory-dev-snowflake

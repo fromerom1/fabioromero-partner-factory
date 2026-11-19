@@ -1,0 +1,52 @@
+-- Platform bootstrap for the {{ platform.environment }} environment.
+-- Run once per environment by an account administrator. Everything after this is done by the
+-- service user: this script is the only place where an administrator role is needed.
+-- Every statement is idempotent, so the script can be re-run, for example to rotate the key.
+
+-- Identity: the role that owns every partner database and the key-pair user that holds it.
+USE ROLE USERADMIN;
+
+CREATE ROLE IF NOT EXISTS {{ sf.pipeline_role }}
+    COMMENT = {{ ('Partner factory: creates and owns the partner databases of ' ~ platform.environment) | literal }};
+
+CREATE USER IF NOT EXISTS {{ sf.service_user }}
+    TYPE = SERVICE
+    DEFAULT_ROLE = {{ sf.pipeline_role }}
+    DEFAULT_WAREHOUSE = {{ sf.warehouse }}
+    COMMENT = 'Partner factory service user for the factory CLI, dbt, Airflow and CI. Key-pair only';
+
+ALTER USER {{ sf.service_user }} SET RSA_PUBLIC_KEY = {{ service_public_key | literal }};
+
+GRANT ROLE {{ sf.pipeline_role }} TO USER {{ sf.service_user }};
+
+-- Custom roles roll up to SYSADMIN so administrators keep visibility of what the factory creates.
+GRANT ROLE {{ sf.pipeline_role }} TO ROLE SYSADMIN;
+
+-- Compute.
+USE ROLE SYSADMIN;
+
+CREATE WAREHOUSE IF NOT EXISTS {{ sf.warehouse }}
+    WAREHOUSE_SIZE = XSMALL
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    INITIALLY_SUSPENDED = TRUE
+    COMMENT = {{ ('Partner factory: deployments and dbt runs of ' ~ platform.environment) | literal }};
+
+GRANT USAGE ON WAREHOUSE {{ sf.warehouse }} TO ROLE {{ sf.pipeline_role }};
+
+-- Account-level objects and privileges.
+USE ROLE ACCOUNTADMIN;
+
+-- IF NOT EXISTS matters here: replacing the integration generates a new external ID, which
+-- breaks the trust policy of the AWS role until Terraform is applied again.
+CREATE STORAGE INTEGRATION IF NOT EXISTS {{ sf.storage_integration }}
+    TYPE = EXTERNAL_STAGE
+    STORAGE_PROVIDER = 'S3'
+    ENABLED = TRUE
+    STORAGE_AWS_ROLE_ARN = {{ aws.snowflake_role_arn | literal }}
+    STORAGE_ALLOWED_LOCATIONS = ({{ ('s3://' ~ aws.bucket ~ '/') | literal }})
+    COMMENT = {{ ('Partner factory: partner files of ' ~ platform.environment) | literal }};
+
+GRANT USAGE ON INTEGRATION {{ sf.storage_integration }} TO ROLE {{ sf.pipeline_role }};
+
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE {{ sf.pipeline_role }};
