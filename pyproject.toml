@@ -1,0 +1,46 @@
+[project]
+name = "partner-factory"
+version = "0.1.0"
+description = "Config-driven pipeline factory that onboards data partners onto Snowflake"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pydantic>=2.9,<3",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "typer>=0.12",
+    "snowflake-connector-python>=4.0",
+    "cryptography>=43",
+    "dbt-core>=1.12,<1.13",
+    "dbt-snowflake>=1.12,<1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "boto3>=1.35",
+]
+
+[project.scripts]
+factory = "partner_factory.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/partner_factory"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["dbt/target", "dbt/dbt_packages", "airflow/.astro"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]

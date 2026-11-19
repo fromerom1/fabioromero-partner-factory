@@ -1,0 +1,44 @@
+# Secrets and local credentials: never commit
+.env
+.env.*
+!.env.example
+*.p8
+*.pem
+*.key
+profiles.yml
+.snowflake/
+.aws/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Terraform: state can hold sensitive values
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Airflow / Astro
+.astro/
+airflow.db
+airflow-webserver.pid
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
