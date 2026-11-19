@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
 from pydantic import ValidationError
 
 from partner_factory import archive as archiving
@@ -208,9 +209,32 @@ LookbackOption = Annotated[
 ]
 
 
+def _split_vars(arguments: list[str]) -> tuple[list[str], dict]:
+    """Take ``--vars`` out of the dbt arguments. dbt keeps only one ``--vars``, and the one it
+    gets holds the partner's variables: what the caller passes is merged into it."""
+    rest, extra, position = [], {}, 0
+    while position < len(arguments):
+        argument = arguments[position]
+        if argument == "--vars" and position + 1 < len(arguments):
+            text, position = arguments[position + 1], position + 1
+        elif argument.startswith("--vars="):
+            text = argument.removeprefix("--vars=")
+        else:
+            rest.append(argument)
+            position += 1
+            continue
+        position += 1
+        value = yaml.safe_load(text)
+        if not isinstance(value, dict):
+            raise _fail(f"--vars must be a YAML mapping, got: {text}")
+        extra |= value
+    return rest, extra
+
+
 def _dbt(platform: Platform, partner: Partner, arguments: list[str], lookback: int | None) -> int:
     """Run dbt for one partner and return its exit code."""
-    variables = processor.dbt_vars(platform, partner)
+    arguments, extra = _split_vars(arguments)
+    variables = processor.dbt_vars(platform, partner) | extra
     if lookback is not None:
         variables["raw_lookback_hours"] = lookback
     command = [
@@ -259,6 +283,8 @@ def archive(
     If the build and its tests pass, those files are copied to historical, the copy is
     confirmed and only then are they removed from landing. Files that arrive during the run,
     or that are not completely loaded, stay in landing for the next run.
+
+    Exits with an error when the build fails or when a file on the list could not be archived.
     """
     platform, partner = _platform(env), _partner(partner_code)
     try:
@@ -272,13 +298,20 @@ def archive(
     if _dbt(platform, partner, ["build"], lookback_hours) != 0:
         raise _fail("the build failed: nothing was archived")
 
+    not_archived = []
     with connect(platform) as connection:
         for path, outcome in archiving.archive(connection, platform, partner, ready):
             typer.echo(f"  {outcome:<10}  {path}")
+            if outcome != archiving.ARCHIVED:
+                not_archived.append(path)
         remaining = archiving.landing_files(connection, platform, partner)
     if remaining:
         typer.echo("Still in landing:")
         _print_table([{"FILE": file.path, "STATE": state} for file, state in remaining])
+    # Files that were not on the list wait for the next run. One that was on it and is still
+    # in landing is a failure of this run, and the scheduler has to see it as one.
+    if not_archived:
+        raise _fail(f"{len(not_archived)} of {len(ready)} files could not be archived")
 
 
 @platform_app.command()
