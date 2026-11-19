@@ -16,3 +16,6 @@ airflow.db
 
 **/.astro/dbt_metadata.json
 **/.astro/*manifest*.slim.json
+
+# Lock file the Astro CLI leaves behind while it runs
+.astro/config.yaml.lock
