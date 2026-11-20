@@ -20,6 +20,43 @@ resource "aws_s3_bucket_public_access_block" "landing" {
   restrict_public_buckets = true
 }
 
+# A partner can deliver a file again under the same name, and archiving removes files from
+# landing. With versioning neither loses the earlier content: it stays as a noncurrent version
+# for 90 days, long enough to investigate a delivery, and is then expired.
+resource "aws_s3_bucket_versioning" "landing" {
+  bucket = aws_s3_bucket.landing.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "landing" {
+  # Noncurrent expiration only applies to a versioned bucket.
+  depends_on = [aws_s3_bucket_versioning.landing]
+  bucket     = aws_s3_bucket.landing.id
+
+  rule {
+    id     = "expire-replaced-and-removed-files"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+
+    # Removes the marker a deletion leaves behind once no version is left under it.
+    expiration {
+      expired_object_delete_marker = true
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 # Only the Snowflake principal of the storage integration can assume the role, and only with the
 # external ID of that integration. Snowflake assumes it when a pipe is created, so this trust
 # must be in place before the first partner is deployed.
