@@ -25,6 +25,19 @@ GRANT ROLE {{ sf.pipeline_role }} TO USER {{ sf.service_user }};
 -- Custom roles roll up to SYSADMIN so administrators keep visibility of what the factory creates.
 GRANT ROLE {{ sf.pipeline_role }} TO ROLE SYSADMIN;
 
+-- Readers. The roles are created here because creating roles needs an administrator; what each
+-- one can read is granted by the pipeline, per partner, on the objects it owns.
+CREATE ROLE IF NOT EXISTS {{ sf.analyst_role }}
+    COMMENT = {{ ('Partner factory ' ~ platform.environment ~ ': reads the standard model and the reports, customer references masked') | literal }};
+
+CREATE ROLE IF NOT EXISTS {{ sf.fraud_credit_role }}
+    COMMENT = {{ ('Partner factory ' ~ platform.environment ~ ': reads the standard model and the reports, customer references visible') | literal }};
+
+-- The pipeline role already reads everything the readers read, so holding their roles gives it
+-- nothing new. It lets the service user open a session as each reader and check what it sees.
+GRANT ROLE {{ sf.analyst_role }} TO ROLE {{ sf.pipeline_role }};
+GRANT ROLE {{ sf.fraud_credit_role }} TO ROLE {{ sf.pipeline_role }};
+
 -- Compute.
 USE ROLE SYSADMIN;
 
@@ -36,6 +49,8 @@ CREATE WAREHOUSE IF NOT EXISTS {{ sf.warehouse }}
     COMMENT = {{ ('Partner factory: deployments and dbt runs of ' ~ platform.environment) | literal }};
 
 GRANT USAGE ON WAREHOUSE {{ sf.warehouse }} TO ROLE {{ sf.pipeline_role }};
+GRANT USAGE ON WAREHOUSE {{ sf.warehouse }} TO ROLE {{ sf.analyst_role }};
+GRANT USAGE ON WAREHOUSE {{ sf.warehouse }} TO ROLE {{ sf.fraud_credit_role }};
 
 -- Account-level objects and privileges.
 USE ROLE ACCOUNTADMIN;

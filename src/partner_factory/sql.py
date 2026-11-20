@@ -54,6 +54,7 @@ class SourceObjects:
     file_format_options: list[str]
     record_expression: str
     file_pattern: str
+    personal_data: bool
 
 
 def file_format_options(source: Source) -> dict[str, object]:
@@ -118,6 +119,7 @@ def source_objects(name: str, source: Source) -> SourceObjects:
         ],
         record_expression=_record_expression(source),
         file_pattern=source.file_pattern,
+        personal_data=source.personal_data,
     )
 
 
@@ -130,6 +132,23 @@ def normalize_public_key(pem: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9+/]{300,}={0,2}", body):
         raise ValueError("the file does not look like a PEM-encoded RSA public key")
     return body
+
+
+# Data protection objects of a partner database. The tag lives in RAW next to what it marks
+# first; the masking policy lives in PROCESSED next to the column it protects.
+PII_TAG = "PII"
+PII_CUSTOMER_DATA = "CUSTOMER_DATA"
+PII_PSEUDONYM = "PSEUDONYM"
+PII_KEY = "PSEUDONYMIZATION_KEY"
+CUSTOMER_REF_POLICY = "CUSTOMER_REF_MASK"
+
+
+def pii_tag(platform: Platform, partner: Partner) -> str:
+    return f"{platform.database(partner)}.RAW.{PII_TAG}"
+
+
+def customer_ref_policy(platform: Platform, partner: Partner) -> str:
+    return f"{platform.database(partner)}.PROCESSED.{CUSTOMER_REF_POLICY}"
 
 
 def platform_sql(platform: Platform, service_public_key_pem: str) -> str:
@@ -152,6 +171,9 @@ def partner_sql(platform: Platform, partner: Partner) -> str:
         landing_url=platform.landing_url(partner),
         historical_url=platform.historical_url(partner),
         key_table=PSEUDONYMIZATION_KEY_TABLE,
+        pii_tag=pii_tag(platform, partner),
+        pii_values={"customer_data": PII_CUSTOMER_DATA, "pseudonym": PII_PSEUDONYM, "key": PII_KEY},
+        customer_ref_policy=customer_ref_policy(platform, partner),
         sources=[source_objects(name, source) for name, source in partner.sources.items()],
     )
 

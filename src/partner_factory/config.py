@@ -159,6 +159,9 @@ class Source(StrictModel):
     """A path the pattern must match. Used to check that no two sources claim the same file."""
     batch_date: BatchDate
     csv: CsvOptions | None = None
+    personal_data: bool = False
+    """True when the records carry data about people, such as customer identifiers or contact
+    details. The raw record is then tagged as personal data."""
 
     @model_validator(mode="after")
     def _check(self) -> Source:
@@ -352,6 +355,17 @@ class Partner(StrictModel):
                 if problem:
                     raise ValueError(f"{where}.fields.{name}: {problem}")
 
+            personal = [
+                name
+                for name in mapping.fields
+                if entity.field(name).kind == "pseudonym" and not source.personal_data
+            ]
+            if personal:
+                raise ValueError(
+                    f"{where}.fields.{personal[0]}: it is read from '{mapping.source}', so that"
+                    f" source must declare 'personal_data: true'"
+                )
+
             missing = [f.name for f in entity.fields if f.required and f.name not in mapping.fields]
             if missing:
                 raise ValueError(
@@ -371,6 +385,14 @@ class SnowflakePlatform(StrictModel):
     pipeline_role: SnowflakeIdentifier
     service_user: SnowflakeIdentifier
     storage_integration: SnowflakeIdentifier
+    analyst_role: SnowflakeIdentifier
+    """Reads the standard model and the reports; customer references are masked."""
+    fraud_credit_role: SnowflakeIdentifier
+    """Reads the same as the analyst and also sees customer references."""
+
+    @property
+    def reader_roles(self) -> list[str]:
+        return [self.analyst_role, self.fraud_credit_role]
 
 
 class AwsPlatform(StrictModel):

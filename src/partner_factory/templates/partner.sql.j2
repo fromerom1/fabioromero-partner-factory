@@ -36,6 +36,34 @@ CREATE TABLE IF NOT EXISTS {{ database }}.RAW.{{ key_table }} (
 INSERT INTO {{ database }}.RAW.{{ key_table }} (KEY_VALUE, CREATED_AT)
 SELECT SHA2(CONCAT(UUID_STRING(), UUID_STRING()), 256), CURRENT_TIMESTAMP()
 WHERE NOT EXISTS (SELECT 1 FROM {{ database }}.RAW.{{ key_table }});
+
+-- Personal data is marked where it lives: the raw records of the sources that carry it, the
+-- key that pseudonymizes it and the customer reference of the standard model. The last one is
+-- tagged by dbt, in the run that builds the table.
+CREATE TAG IF NOT EXISTS {{ pii_tag }}
+    ALLOWED_VALUES {{ pii_values.customer_data | literal }}, {{ pii_values.pseudonym | literal }}, {{ pii_values.key | literal }}
+    COMMENT = 'Personal data, by kind: as delivered, pseudonymized, or the key that links the two';
+
+ALTER TABLE {{ database }}.RAW.{{ key_table }} SET TAG {{ pii_tag }} = {{ pii_values.key | literal }};
+
+-- Who sees a customer reference: the pipeline, which computes and compares it, and fraud/credit.
+-- Every other role gets NULL. dbt attaches the policy to the column in the run that builds
+-- the table, so a rebuilt table is never readable without it.
+CREATE MASKING POLICY IF NOT EXISTS {{ customer_ref_policy }}
+    AS (value VARCHAR) RETURNS VARCHAR ->
+    CASE
+        WHEN IS_ROLE_IN_SESSION({{ sf.pipeline_role | literal }})
+            OR IS_ROLE_IN_SESSION({{ sf.fraud_credit_role | literal }}) THEN value
+    END
+    COMMENT = 'Customer references are visible to the pipeline and to fraud/credit only';
+
+-- Readers enter the database and the two schemas they read from. RAW is never granted, and
+-- inside PROCESSED they get the standard tables only: dbt grants those, table by table.
+{% for role in sf.reader_roles %}
+GRANT USAGE ON DATABASE {{ database }} TO ROLE {{ role }};
+GRANT USAGE ON SCHEMA {{ database }}.PROCESSED TO ROLE {{ role }};
+GRANT USAGE ON SCHEMA {{ database }}.ANALYTICS TO ROLE {{ role }};
+{% endfor %}
 {% for source in sources %}
 
 -- Source "{{ source.name }}"
@@ -53,6 +81,11 @@ CREATE TABLE IF NOT EXISTS {{ database }}.RAW.{{ source.table }} (
     LOADED_AT           TIMESTAMP_LTZ  COMMENT 'When the platform loaded the record'
 )
     COMMENT = {{ (partner.partner_code ~ ' / ' ~ source.name ~ ': ' ~ source.description) | literal }};
+{% if source.personal_data %}
+
+ALTER TABLE {{ database }}.RAW.{{ source.table }} MODIFY COLUMN RECORD
+    SET TAG {{ pii_tag }} = {{ pii_values.customer_data | literal }};
+{% endif %}
 
 -- LOADED_AT uses METADATA$START_SCAN_TIME: inside a pipe CURRENT_TIMESTAMP is evaluated when
 -- the load is compiled, not when the file is loaded.

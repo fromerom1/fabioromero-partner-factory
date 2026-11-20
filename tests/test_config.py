@@ -175,3 +175,11 @@ def test_customer_data_can_only_leave_raw_pseudonymized() -> None:
 
 def test_the_transaction_key_must_include_the_transaction_id() -> None:
     _rejects("standard_model.sales_transaction.key", ["store_id"], "must include transaction_id")
+
+
+def test_a_source_that_feeds_customer_references_must_declare_personal_data() -> None:
+    reference = {"from": "customer.id", "transforms": ["pseudonymize"]}
+    _rejects(f"{FIELDS}.customer_ref", reference, "must declare 'personal_data: true'")
+    config = _changed(f"{FIELDS}.customer_ref", reference)
+    config["sources"]["orders"]["personal_data"] = True
+    assert Partner.model_validate(config)

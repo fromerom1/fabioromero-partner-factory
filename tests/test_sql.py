@@ -1,6 +1,7 @@
 """Generated SQL: what the loader of a partner looks like, and what it must never contain."""
 
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -128,3 +129,49 @@ def test_quotes_in_free_text_are_escaped_and_backslashes_refused() -> None:
     for text in ("a\\'b", "a\nb"):
         with pytest.raises(ValueError, match="cannot be rendered"):
             sql.literal(text)
+
+
+@pytest.mark.parametrize("name", PARTNERS)
+def test_readers_are_never_granted_raw_or_whole_schemas(name: str) -> None:
+    script = sql.partner_sql(PLATFORM, PARTNERS[name])
+    database = PLATFORM.database(PARTNERS[name])
+    grants = [line for line in script.splitlines() if line.startswith("GRANT ")]
+    # Entering the database and two schemas; the tables themselves are granted one by one by dbt.
+    assert sorted(grants) == sorted(
+        f"GRANT USAGE ON {target} TO ROLE {role};"
+        for role in PLATFORM.snowflake.reader_roles
+        for target in (
+            f"DATABASE {database}",
+            f"SCHEMA {database}.PROCESSED",
+            f"SCHEMA {database}.ANALYTICS",
+        )
+    )
+
+
+def test_the_masking_policy_shows_customer_references_to_two_roles_only() -> None:
+    script = sql.partner_sql(PLATFORM, PARTNERS["tiendaviva_es"])
+    policy = "TIENDAVIVA_ES_DEV.PROCESSED.CUSTOMER_REF_MASK"
+    assert f"CREATE MASKING POLICY IF NOT EXISTS {policy}\n" in script
+    in_session = re.findall(r"IS_ROLE_IN_SESSION\('(\w+)'\)", script)
+    sf = PLATFORM.snowflake
+    assert in_session == [sf.pipeline_role, sf.fraud_credit_role]
+
+
+def test_raw_records_are_tagged_only_for_sources_with_personal_data() -> None:
+    tag = "SET TAG {db}.RAW.PII = 'CUSTOMER_DATA'"
+    spain = sql.partner_sql(PLATFORM, PARTNERS["tiendaviva_es"])
+    assert (
+        "ALTER TABLE TIENDAVIVA_ES_DEV.RAW.ORDERS MODIFY COLUMN RECORD\n    "
+        + tag.format(db="TIENDAVIVA_ES_DEV")
+    ) in spain
+    assert spain.count("'CUSTOMER_DATA';") == 1
+    assert "'CUSTOMER_DATA';" not in sql.partner_sql(PLATFORM, PARTNERS["mercadolocal_br"])
+
+
+def test_bootstrap_creates_the_reader_roles() -> None:
+    marker = "PUBLIC" + " KEY"
+    pem = f"-----BEGIN {marker}-----\n{'A' * 400}\n-----END {marker}-----\n"
+    script = sql.platform_sql(PLATFORM, pem)
+    for role in PLATFORM.snowflake.reader_roles:
+        assert f"CREATE ROLE IF NOT EXISTS {role}\n" in script
+        assert f"GRANT USAGE ON WAREHOUSE {PLATFORM.snowflake.warehouse} TO ROLE {role};" in script
