@@ -197,3 +197,14 @@ def test_no_mapping_option_can_carry_sql(path: str, value: object) -> None:
     node[key] = value
     with pytest.raises(ValidationError):
         Partner.model_validate(config)
+
+
+def test_dbt_gets_the_readers_and_the_protection_of_customer_ref() -> None:
+    variables = processor.dbt_vars(PLATFORM, PARTNERS["tiendaviva_es"])
+    assert variables["reader_roles"] == [
+        "PARTNER_FACTORY_DEV_ANALYST",
+        "PARTNER_FACTORY_DEV_FRAUD_CREDIT",
+    ]
+    assert variables["customer_ref_policy"] == "TIENDAVIVA_ES_DEV.PROCESSED.CUSTOMER_REF_MASK"
+    assert variables["pii_tag"] == "TIENDAVIVA_ES_DEV.RAW.PII"
+    assert variables["customer_ref_tag_value"] == "PSEUDONYM"

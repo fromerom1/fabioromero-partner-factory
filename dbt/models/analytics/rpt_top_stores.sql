@@ -1,3 +1,5 @@
+{{ config(grants={'select': var('reader_roles')}) }}
+
 -- Report 3. The stores that sold the most on each of the most recent dates that have sales.
 
 with store_sales as (

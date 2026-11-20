@@ -1,3 +1,5 @@
+{{ config(grants={'select': var('reader_roles')}) }}
+
 -- Report 2. Sales by transaction date, for the most recent dates that have sales.
 
 with daily as (

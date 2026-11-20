@@ -3,7 +3,9 @@
         materialized='incremental',
         incremental_strategy='merge',
         unique_key=var('sales_transaction').key,
-        on_schema_change='fail'
+        on_schema_change='fail',
+        post_hook=protect_customer_ref(),
+        grants={'select': var('reader_roles')}
     )
 }}
 

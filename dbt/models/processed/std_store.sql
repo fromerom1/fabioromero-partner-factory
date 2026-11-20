@@ -1,3 +1,5 @@
+{{ config(grants={'select': var('reader_roles')}) }}
+
 -- One row per store, recomputed on every run from everything the partner has sent.
 -- Attributes come from the last record received; first and last appearance from batch dates.
 
