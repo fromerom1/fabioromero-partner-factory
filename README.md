@@ -84,11 +84,16 @@ Every command below is run from the repository root.
 Done once per environment. The order matters because Snowflake and AWS each need a value that
 only exists after the other side has been created, so Terraform is applied twice.
 
+**Before you start.** `platform/dev.yml` holds the identifiers of my DEV environment. Put yours
+in it: `snowflake.account`, `aws.account_id`, `aws.region` and `aws.bucket` (bucket names are
+global, so the one in the file is taken). The factory and Terraform both read this file.
+
 **1. Key pair of the service user.** Keep both files outside the repository.
 
 ```bash
-openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -nocrypt -out svc_rsa_key.p8
-openssl rsa -in svc_rsa_key.p8 -pubout -out svc_rsa_key.pub
+mkdir -p ~/.partner-factory
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -nocrypt -out ~/.partner-factory/svc_rsa_key.p8
+openssl rsa -in ~/.partner-factory/svc_rsa_key.p8 -pubout -out ~/.partner-factory/svc_rsa_key.pub
 ```
 
 **2. Bootstrap, as an account administrator.** The only step that needs one. It creates the
@@ -98,13 +103,13 @@ integration. Everything after this is done by the service user.
 ```bash
 SNOWFLAKE_USER=<admin user> SNOWFLAKE_ROLE=ACCOUNTADMIN \
 SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/admin_rsa_key.p8 \
-  uv run factory platform bootstrap --service-public-key /path/to/svc_rsa_key.pub
+  uv run factory platform bootstrap --service-public-key ~/.partner-factory/svc_rsa_key.pub
 ```
 
 From here on, the only credential the factory needs is the private key of the service user:
 
 ```bash
-export SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/svc_rsa_key.p8
+export SNOWFLAKE_PRIVATE_KEY_FILE=~/.partner-factory/svc_rsa_key.p8
 ```
 
 **3. Terraform, first apply.** Creates the bucket and the role Snowflake assumes. The role
