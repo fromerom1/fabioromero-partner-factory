@@ -100,6 +100,12 @@ sources:                             # one entry per kind of file; each becomes 
     example_file: orders/2026/10/06/tiendaviva_orders_20261006_01.jsonl
     batch_date: {regex: "tiendaviva_orders_([0-9]{8})_", format: YYYYMMDD}
     personal_data: true              # the records carry customer data
+  shops:
+    description: Monthly full snapshot of shops, one JSON document per file.
+    format: json
+    file_pattern: "(.*/)?shops_[0-9]{6}[.]json"
+    example_file: shops_202610.json
+    batch_date: {regex: "shops_([0-9]{6})[.]json", format: YYYYMM}
 
 standard_model:
   store:
@@ -382,7 +388,8 @@ the standard model, every sale is in the partner's currency, and times are compu
 
 **Why records were rejected.** A required field that is absent gives `missing_<field>`; a
 value that is present but cannot be read gives `invalid_<field>`. There are also
-`unexpected_extra_field` (a CSV line with more fields than columns) and `invalid_batch_date`.
+`unexpected_extra_field` (a CSV line with a value right after the last column; a line whose
+first surplus field is empty is not caught) and `invalid_batch_date`.
 
 ```sql
 SELECT entity, reason.value::VARCHAR AS reason, COUNT(*) AS records
