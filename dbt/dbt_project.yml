@@ -27,10 +27,10 @@ models:
       +schema: PROCESSED
       +materialized: table
     # Reports are kept by snapshot date. Running again on the same day replaces that day's
-    # snapshot instead of adding to it; earlier snapshots are never touched.
+    # snapshot, also when the new one is empty; earlier snapshots are never touched.
+    # The strategy is the macro get_incremental_replace_snapshot_sql.
     analytics:
       +schema: ANALYTICS
       +materialized: incremental
-      +incremental_strategy: delete+insert
-      +unique_key: snapshot_date
+      +incremental_strategy: replace_snapshot
       +on_schema_change: fail

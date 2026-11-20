@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from snowflake.connector import SnowflakeConnection
+from snowflake.connector.errors import Error as SnowflakeError
 
 from partner_factory.config import Partner, Platform
 from partner_factory.connection import query
@@ -25,6 +26,8 @@ NOT_LOADED = "not loaded"
 LOAD_FAILED = "load failed"
 PARTIALLY_LOADED = "partially loaded"
 CHANGED_AFTER_LOAD = "changed after load"
+LOAD_UNVERIFIED = "load unverified"
+ARCHIVED = "archived"
 
 # File names come from the partner. Only names made of these characters are used in commands;
 # anything else stays in landing and is reported.
@@ -64,9 +67,12 @@ def state(file: LandingFile, load: Load | None) -> str:
         # Re-sent under the same name: Snowpipe does not load a file name twice, so what is in
         # landing now is not what is in RAW.
         return CHANGED_AFTER_LOAD
-    if load.status is not None and (
-        load.status != "Loaded" or load.errors or load.parsed != load.records
-    ):
+    if load.status is None:
+        # The copy history is gone (it lasts 14 days), and with it the only count of what the
+        # file held. Records in RAW with the right checksum do not prove that all of them
+        # are there, so the file is not archived on that alone.
+        return LOAD_UNVERIFIED
+    if load.status != "Loaded" or load.errors or load.parsed != load.records:
         return PARTIALLY_LOADED
     return LOADED
 
@@ -154,33 +160,45 @@ def archive(
     in_historical = _listing(connection, historical, "/historical/")
 
     for file in files:
-        if not _SAFE_PATH.fullmatch(file.path):
-            yield file.path, "left in landing: unsupported characters in the file name"
-            continue
-        if in_landing.get(file.path) != file.content_key:
-            if file.path in in_landing:
-                yield file.path, "left in landing: replaced during the run"
-            continue  # already moved by an earlier attempt
+        try:
+            outcome = _move(connection, landing, historical, file, in_landing, in_historical)
+        except SnowflakeError as error:
+            # One file that cannot be moved does not stop the others.
+            outcome = f"left in landing: {' '.join(str(error).split())}"
+        if outcome:
+            yield file.path, outcome
 
-        archived = in_historical.get(file.path)
-        if archived is not None and archived != file.content_key:
-            yield file.path, "left in landing: historical holds a different file with this name"
-            continue
-        if archived is None:
-            # COPY FILES keeps the path relative to the source stage, subfolders included.
-            query(
-                connection,
-                f"COPY FILES INTO @{historical} FROM @{landing} FILES = ({literal(file.path)})",
-            )
-            copies = query(connection, f"LIST @{historical} PATTERN = {literal(_exact(file.path))}")
-            if [row["md5"] for row in copies] != [file.content_key]:
-                yield file.path, "left in landing: the copy in historical could not be confirmed"
-                continue
 
-        # Remove exactly this file, and only while landing still holds the content just copied.
-        target_files = query(connection, f"LIST @{landing} PATTERN = {literal(_exact(file.path))}")
-        if [row["md5"] for row in target_files] != [file.content_key]:
-            yield file.path, "left in landing: replaced during the run"
-            continue
-        query(connection, f"REMOVE @{landing} PATTERN = {literal(_exact(file.path))}")
-        yield file.path, "archived"
+def _move(
+    connection: SnowflakeConnection,
+    landing: str,
+    historical: str,
+    file: LandingFile,
+    in_landing: dict[str, str],
+    in_historical: dict[str, str],
+) -> str | None:
+    """Move one file and say what happened. None when an earlier attempt already moved it."""
+    if not _SAFE_PATH.fullmatch(file.path):
+        return "left in landing: unsupported characters in the file name"
+    if in_landing.get(file.path) != file.content_key:
+        return "left in landing: replaced during the run" if file.path in in_landing else None
+
+    archived = in_historical.get(file.path)
+    if archived is not None and archived != file.content_key:
+        return "left in landing: historical holds a different file with this name"
+    if archived is None:
+        # COPY FILES keeps the path relative to the source stage, subfolders included.
+        query(
+            connection,
+            f"COPY FILES INTO @{historical} FROM @{landing} FILES = ({literal(file.path)})",
+        )
+        copies = query(connection, f"LIST @{historical} PATTERN = {literal(_exact(file.path))}")
+        if [row["md5"] for row in copies] != [file.content_key]:
+            return "left in landing: the copy in historical could not be confirmed"
+
+    # Remove exactly this file, and only while landing still holds the content just copied.
+    target_files = query(connection, f"LIST @{landing} PATTERN = {literal(_exact(file.path))}")
+    if [row["md5"] for row in target_files] != [file.content_key]:
+        return "left in landing: replaced during the run"
+    query(connection, f"REMOVE @{landing} PATTERN = {literal(_exact(file.path))}")
+    return ARCHIVED
