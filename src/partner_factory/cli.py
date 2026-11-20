@@ -7,6 +7,7 @@ Run from the repository root::
     factory deploy MERCADOLOCAL_BR
     factory platform aws-vars                                # values Terraform needs from Snowflake
     factory load-status MERCADOLOCAL_BR
+    factory check-access MERCADOLOCAL_BR                     # what each role reads and sees
 """
 
 from __future__ import annotations
@@ -21,8 +22,8 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
+from partner_factory import access, drift, processor, sql
 from partner_factory import archive as archiving
-from partner_factory import drift, processor, sql
 from partner_factory.config import Partner, Platform, load_partner, load_platform
 from partner_factory.connection import (
     MissingCredentials,
@@ -279,6 +280,41 @@ def archive(
     if remaining:
         typer.echo("Still in landing:")
         _print_table([{"FILE": file.path, "STATE": state} for file, state in remaining])
+
+
+@app.command("check-access")
+def check_access(partner_code: str, env: EnvOption = "dev") -> None:
+    """Show what each role can read in a partner database and what it sees in customer_ref.
+
+    Opens one session per role, with secondary roles off, and compares the result with the
+    rules: readers get the standard tables and the reports, only fraud/credit and the pipeline
+    see customer references, and the personal-data tags and the masking policy are in place.
+    Prints counts only. Exits with an error on any difference.
+    """
+    platform, partner = _platform(env), _partner(partner_code)
+    try:
+        report = access.check(lambda role: connect(platform, role=role), platform, partner)
+    except MissingCredentials as error:
+        raise _fail(str(error)) from error
+
+    def customer_ref(role: str) -> str:
+        counts = report.customer_refs[role]
+        if counts is None:
+            return access.DENIED
+        total, visible = counts
+        return f"{'visible' if visible else 'none visible'} ({visible} of {total} rows)"
+
+    typer.echo(f"{platform.database(partner)}, one session per role, secondary roles off\n")
+    _print_table(
+        [{"OBJECT": name} | granted for name, granted in report.access.items()]
+        + [{"OBJECT": "customer_ref values"} | {role: customer_ref(role) for role in report.roles}]
+    )
+    typer.echo("")
+    for name, found in report.protections.items():
+        typer.echo(f"  {'ok     ' if found else 'MISSING'}  {name}")
+    if report.problems:
+        raise _fail("\nNot as expected:\n  " + "\n  ".join(report.problems))
+    typer.echo("\nEverything is as expected.")
 
 
 @platform_app.command()
