@@ -1,3 +1,5 @@
+{{ config(grants={'select': var('reader_roles')}) }}
+
 -- Report 1. Processing by batch date: what the partner delivered and what became of it.
 -- Counts every source of the partner. A record is either valid or rejected; a valid record
 -- later superseded by a newer one still counts as valid. Header lines are not records.

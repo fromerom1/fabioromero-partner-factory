@@ -31,8 +31,13 @@ class StatementFailed(RuntimeError):
 
 
 @contextmanager
-def connect(platform: Platform, *, administrator: bool = False) -> Iterator[SnowflakeConnection]:
+def connect(
+    platform: Platform, *, administrator: bool = False, role: str | None = None
+) -> Iterator[SnowflakeConnection]:
     """Open a session as the service user, or as an administrator for the platform bootstrap.
+
+    ``role`` opens the service user's session with another of its roles instead of the pipeline
+    role, to see what a reader sees.
 
     The administrator session takes user and role from ``SNOWFLAKE_USER`` and ``SNOWFLAKE_ROLE``
     and uses no warehouse, because the bootstrap is what creates it.
@@ -49,7 +54,7 @@ def connect(platform: Platform, *, administrator: bool = False) -> Iterator[Snow
             )
         warehouse = None
     else:
-        user, role = platform.snowflake.service_user, platform.snowflake.pipeline_role
+        user, role = platform.snowflake.service_user, role or platform.snowflake.pipeline_role
         warehouse = platform.snowflake.warehouse
 
     connection = snowflake.connector.connect(

@@ -18,7 +18,14 @@ from partner_factory.config import (
     Platform,
     Source,
 )
-from partner_factory.sql import EXTRA_FIELD_KEY, PSEUDONYMIZATION_KEY_TABLE, literal
+from partner_factory.sql import (
+    EXTRA_FIELD_KEY,
+    PII_PSEUDONYM,
+    PSEUDONYMIZATION_KEY_TABLE,
+    customer_ref_policy,
+    literal,
+    pii_tag,
+)
 from partner_factory.standard_model import ENTITIES, SALE_STATUSES, SQL_TYPES, StandardField
 
 # Transformations that rewrite the text of a value before it is typed.
@@ -191,5 +198,10 @@ def dbt_vars(platform: Platform, partner: Partner) -> dict:
         "currency_code": partner.currency_code,
         "timezone": partner.timezone,
         "timezone_sql": timezone_sql(partner),
+        # Who may read the standard tables and the reports, and how customer_ref is protected.
+        "reader_roles": platform.snowflake.reader_roles,
+        "customer_ref_policy": customer_ref_policy(platform, partner),
+        "pii_tag": pii_tag(platform, partner),
+        "customer_ref_tag_value": PII_PSEUDONYM,
         **{name: entity_spec(platform, partner, name) for name in ENTITIES},
     }
